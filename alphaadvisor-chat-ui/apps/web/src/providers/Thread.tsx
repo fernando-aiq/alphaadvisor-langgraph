@@ -13,6 +13,10 @@ import {
 } from "react";
 import { createClient } from "./client";
 
+// Valores padrão das variáveis de ambiente
+const DEFAULT_API_URL = process.env.NEXT_PUBLIC_API_URL;
+const DEFAULT_ASSISTANT_ID = process.env.NEXT_PUBLIC_ASSISTANT_ID;
+
 interface ThreadContextType {
   getThreads: () => Promise<Thread[]>;
   threads: Thread[];
@@ -39,19 +43,23 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
   const [threads, setThreads] = useState<Thread[]>([]);
   const [threadsLoading, setThreadsLoading] = useState(false);
 
+  // Usa query params se disponível, senão usa variáveis de ambiente
+  const finalApiUrl = apiUrl || DEFAULT_API_URL;
+  const finalAssistantId = assistantId || DEFAULT_ASSISTANT_ID;
+
   const getThreads = useCallback(async (): Promise<Thread[]> => {
-    if (!apiUrl || !assistantId) return [];
-    const client = createClient(apiUrl, getApiKey() ?? undefined);
+    if (!finalApiUrl || !finalAssistantId) return [];
+    const client = createClient(finalApiUrl, getApiKey() ?? undefined);
 
     const threads = await client.threads.search({
       metadata: {
-        ...getThreadSearchMetadata(assistantId),
+        ...getThreadSearchMetadata(finalAssistantId),
       },
       limit: 100,
     });
 
     return threads;
-  }, [apiUrl, assistantId]);
+  }, [finalApiUrl, finalAssistantId]);
 
   const value = {
     getThreads,
