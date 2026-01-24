@@ -1,0 +1,26 @@
+# LangGraph Server - Requirements para Elastic Beanstalk
+# Baseado em pyproject.toml
+
+# Core LangGraph
+langgraph>=1.0.0
+langchain-openai>=0.3.0
+langchain-core>=0.3.0
+langchain>=0.1.0
+
+# Server
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+gunicorn>=21.2.0
+
+# Environment
+python-dotenv>=1.0.1
+
+# LangSmith (opcional, mas recomendado)
+langsmith>=0.1.0
+
+# Pydantic
+pydantic>=2.0.0
+
+# Webhook support
+requests>=2.31.0
+flask>=3.0.0
