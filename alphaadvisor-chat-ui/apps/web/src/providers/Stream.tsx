@@ -10,16 +10,17 @@ const StreamContext = createContext<ReturnType<typeof useStream> | undefined>(
 );
 
 // Valores padrão das variáveis de ambiente
-const DEFAULT_API_URL = process.env.NEXT_PUBLIC_API_URL;
-const DEFAULT_ASSISTANT_ID = process.env.NEXT_PUBLIC_ASSISTANT_ID;
+const DEFAULT_API_URL = process.env.NEXT_PUBLIC_API_URL?.trim();
+const DEFAULT_ASSISTANT_ID = process.env.NEXT_PUBLIC_ASSISTANT_ID?.trim();
 
 export function StreamProvider({ children }: { children: ReactNode }) {
   const [apiUrl] = useQueryState("apiUrl");
   const [assistantId] = useQueryState("assistantId");
 
   // Usa query params se disponível, senão usa variáveis de ambiente
-  const finalApiUrl = apiUrl || DEFAULT_API_URL;
-  const finalAssistantId = assistantId || DEFAULT_ASSISTANT_ID;
+  // Remove espaços e quebras de linha para evitar erros
+  const finalApiUrl = (apiUrl || DEFAULT_API_URL)?.trim();
+  const finalAssistantId = (assistantId || DEFAULT_ASSISTANT_ID)?.trim();
 
   const stream = useStream({
     assistantId: finalAssistantId || undefined,

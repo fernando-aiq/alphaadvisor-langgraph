@@ -1,5 +1,5 @@
 // Valores padrão das variáveis de ambiente
-const DEFAULT_API_KEY = process.env.NEXT_PUBLIC_LANGSMITH_API_KEY;
+const DEFAULT_API_KEY = process.env.NEXT_PUBLIC_LANGSMITH_API_KEY?.trim();
 
 export function getApiKey(): string | null {
   try {

@@ -44,8 +44,9 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
   const [threadsLoading, setThreadsLoading] = useState(false);
 
   // Usa query params se disponível, senão usa variáveis de ambiente
-  const finalApiUrl = apiUrl || DEFAULT_API_URL;
-  const finalAssistantId = assistantId || DEFAULT_ASSISTANT_ID;
+  // Remove espaços e quebras de linha para evitar erros
+  const finalApiUrl = (apiUrl || DEFAULT_API_URL)?.trim();
+  const finalAssistantId = (assistantId || DEFAULT_ASSISTANT_ID)?.trim();
 
   const getThreads = useCallback(async (): Promise<Thread[]> => {
     if (!finalApiUrl || !finalAssistantId) return [];
