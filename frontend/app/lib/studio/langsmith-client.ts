@@ -45,6 +45,21 @@ export interface ListThreadsParams {
   offset?: number
 }
 
+export interface GraphStructure {
+  nodes: Array<{
+    id: string
+    name?: string
+    type?: string
+    label?: string
+  }>
+  edges: Array<{
+    source: string
+    target: string
+    condition?: string
+  }>
+  entry_point?: string
+}
+
 export interface ListRunsParams {
   limit?: number
   offset?: number
@@ -154,29 +169,44 @@ class LangSmithStudioClient {
   }
 
   /**
-   * Cria um novo run em uma thread
+   * Obtém a estrutura do grafo de um assistente
    */
-  async createRun(
-    threadId: string,
-    assistantId: string,
-    input: { messages?: Array<{ role: string; content: string }> }
-  ): Promise<Run> {
-    const response = await fetch(`${this.baseUrl}/threads/${threadId}/runs`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        assistant_id: assistantId,
-        input,
-      }),
-    })
+  async getGraphStructure(assistantId: string): Promise<GraphStructure> {
+    const response = await fetch(`${this.baseUrl}/assistants/${assistantId}/graph`)
     
     if (!response.ok) {
-      throw new Error(`Failed to create run: ${response.statusText}`)
+      // Se não conseguir obter, retornar estrutura padrão
+      if (response.status === 404) {
+        console.warn(`Graph structure not found for assistant ${assistantId}, using default`)
+        return this.getDefaultGraphStructure(assistantId)
+      }
+      throw new Error(`Failed to get graph structure: ${response.statusText}`)
     }
 
     return response.json()
+  }
+
+  /**
+   * Retorna estrutura padrão do grafo (fallback)
+   */
+  private getDefaultGraphStructure(assistantId: string): GraphStructure {
+    return {
+      nodes: [
+        { id: 'init', name: 'init', type: 'init', label: 'Inicialização' },
+        { id: 'agent', name: 'agent', type: 'agent', label: 'Agente' },
+        { id: 'tools', name: 'tools', type: 'tool', label: 'Ferramentas' },
+        { id: 'end', name: 'end', type: 'end', label: 'Fim' },
+      ],
+      edges: [
+        { source: 'START', target: 'init' },
+        { source: 'init', target: 'agent' },
+        { source: 'agent', target: 'tools', condition: 'has_tool_calls' },
+        { source: 'agent', target: 'end', condition: 'no_tool_calls' },
+        { source: 'tools', target: 'agent' },
+        { source: 'end', target: 'END' },
+      ],
+      entry_point: 'init',
+    }
   }
 }
 
