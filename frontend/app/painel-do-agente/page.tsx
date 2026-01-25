@@ -132,21 +132,20 @@ export default function PainelDoAgente() {
     console.log('[Painel do Agente] Iniciando agregação de dados...')
     
     try {
-      // 1. Buscar todas as threads usando a rota API do Next.js
-      console.log('[Painel do Agente] Buscando threads...')
-      const threadsResponse = await fetch(`/api/studio/threads?limit=1000`)
+      // 1. Buscar runs diretamente do LangSmith usando a nova rota API
+      console.log('[Painel do Agente] Buscando runs do LangSmith...')
+      const runsResponse = await fetch(`/api/painel-agente/runs?limit=1000`)
       
-      if (!threadsResponse.ok) {
-        const errorText = await threadsResponse.text().catch(() => 'Unknown error')
-        console.error('[Painel do Agente] Erro ao buscar threads:', {
-          status: threadsResponse.status,
-          statusText: threadsResponse.statusText,
+      if (!runsResponse.ok) {
+        const errorText = await runsResponse.text().catch(() => 'Unknown error')
+        console.error('[Painel do Agente] Erro ao buscar runs:', {
+          status: runsResponse.status,
+          statusText: runsResponse.statusText,
           errorText,
         })
-        // Se retornar 405 ou 404, significa que o endpoint não está disponível
-        // Retornar dados vazios em vez de lançar erro
-        if (threadsResponse.status === 404 || threadsResponse.status === 405) {
-          console.warn('[Painel do Agente] Endpoint de threads não disponível, retornando dados vazios')
+        // Se retornar 404 ou 405, retornar dados vazios
+        if (runsResponse.status === 404 || runsResponse.status === 405) {
+          console.warn('[Painel do Agente] Endpoint de runs não disponível, retornando dados vazios')
           return {
             summary: {
               total_traces: 0,
@@ -163,16 +162,16 @@ export default function PainelDoAgente() {
             clients: [],
           }
         }
-        throw new Error(`Failed to fetch threads: ${threadsResponse.status} ${threadsResponse.statusText}`)
+        throw new Error(`Failed to fetch runs: ${runsResponse.status} ${runsResponse.statusText}`)
       }
       
-      const threadsData = await threadsResponse.json()
-      const threads = Array.isArray(threadsData.threads) ? threadsData.threads : (threadsData.threads || [])
-      console.log('[Painel do Agente] Threads encontradas:', threads.length)
-      setThreadsCache(threads)
+      const runsData = await runsResponse.json()
+      const runs = Array.isArray(runsData.runs) ? runsData.runs : (runsData.runs || [])
+      console.log('[Painel do Agente] Runs encontrados:', runs.length)
+      setRunsCache({ all: runs })
       
-      if (threads.length === 0) {
-        console.warn('[Painel do Agente] Nenhuma thread encontrada')
+      if (runs.length === 0) {
+        console.warn('[Painel do Agente] Nenhum run encontrado')
         return {
           summary: {
             total_traces: 0,
@@ -190,173 +189,86 @@ export default function PainelDoAgente() {
         }
       }
       
-      // 2. Para cada thread, buscar runs e state
-      console.log('[Painel do Agente] Buscando runs para', threads.length, 'threads...')
-      const runsPromises = threads.map(async (thread: any) => {
-        try {
-          const threadId = thread.thread_id || thread.id || thread._id
-          if (!threadId) {
-            console.warn('[Painel do Agente] Thread sem ID válido:', thread)
-            return { threadId: null, runs: [] }
-          }
-          
-          const runsResponse = await fetch(`/api/studio/threads/${threadId}/runs?limit=100`)
-          if (!runsResponse.ok) {
-            console.warn(`[Painel do Agente] Erro ao buscar runs da thread ${threadId}:`, runsResponse.status)
-            return { threadId, runs: [] }
-          }
-          const runsData = await runsResponse.json()
-          const runs = Array.isArray(runsData) ? runsData : (runsData.runs || [])
-          return { threadId, runs }
-        } catch (error) {
-          const threadId = thread.thread_id || thread.id || thread._id
-          console.error(`[Painel do Agente] Erro ao buscar runs da thread ${threadId}:`, error)
-          return { threadId: threadId || null, runs: [] }
-        }
-      })
-      
-      const runsResults = await Promise.all(runsPromises)
-      const runsMap: Record<string, any[]> = {}
-      let totalRuns = 0
-      runsResults.forEach(({ threadId, runs }) => {
-        if (threadId) {
-          runsMap[threadId] = runs
-          totalRuns += runs.length
-        }
-      })
-      console.log('[Painel do Agente] Total de runs encontrados:', totalRuns)
-      setRunsCache(runsMap)
-      
-      // 3. Buscar states das threads (paralelo limitado para não sobrecarregar)
-      console.log('[Painel do Agente] Buscando states para', Math.min(threads.length, 100), 'threads...')
-      const statePromises = threads.slice(0, 100).map(async (thread: any) => {
-        try {
-          const threadId = thread.thread_id || thread.id || thread._id
-          if (!threadId) return null
-          
-          const stateResponse = await fetch(`/api/studio/threads/${threadId}/state`)
-          if (!stateResponse.ok) {
-            console.warn(`[Painel do Agente] Erro ao buscar state da thread ${threadId}:`, stateResponse.status)
-            return null
-          }
-          const state = await stateResponse.json()
-          return { threadId, state }
-        } catch (error) {
-          const threadId = thread.thread_id || thread.id || thread._id
-          console.error(`[Painel do Agente] Erro ao buscar state da thread ${threadId}:`, error)
-          return null
-        }
-      })
-      
-      const stateResults = await Promise.all(statePromises)
-      const statesMap: Record<string, any> = {}
-      let statesFound = 0
-      stateResults.forEach((result) => {
-        if (result) {
-          statesMap[result.threadId] = result.state
-          statesFound++
-        }
-      })
-      console.log('[Painel do Agente] States encontrados:', statesFound)
-      setStatesCache(statesMap)
-      
-      // 4. Agregar dados para criar traces, summary e handoffs
+      // 2. Agregar dados dos runs para criar traces, summary e handoffs
       console.log('[Painel do Agente] Agregando dados para criar traces...')
       const traces: Trace[] = []
       const handoffs: Handoff[] = []
       
-      threads.forEach((thread: any) => {
-        const threadId = thread.thread_id || thread.id || thread._id
-        if (!threadId) return
+      runs.forEach((run: any) => {
+        // Extrair informações do run do LangSmith
+        const runId = run.run_id || run.id || run.runId
+        const traceId = run.trace_id || runId
+        if (!runId) {
+          console.warn('[Painel do Agente] Run sem ID válido:', run)
+          return
+        }
         
-        const threadRuns = runsMap[threadId] || []
-        const threadState = statesMap[threadId]
+        // Extrair metadata do run
+        const metadata = run.metadata || run.extra || {}
+        const inputs = run.inputs || {}
+        const outputs = run.outputs || {}
         
-        // Se não há runs, criar um trace baseado na thread
-        if (threadRuns.length === 0) {
-          const metadata = thread.metadata || threadState?.metadata || {}
-          const values = threadState?.values || {}
-          const userInput = values?.messages?.[0]?.content || values?.input || metadata.user_input || ''
-          
-          const hasHandoff = metadata.has_handoff === true || 
-                            metadata.handoff === true ||
-                            (values?.next && Array.isArray(values.next) && values.next.some((n: any) => String(n).includes('handoff')))
-          
-          const trace: Trace = {
-            trace_id: threadId,
-            timestamp: thread.created_at || thread.createdAt || new Date().toISOString(),
-            user_input: userInput,
-            intent: metadata.intent || values?.intent,
-            route: metadata.route || values?.route,
-            status: 'completed',
-            client_id: metadata.client_id,
-            client_name: metadata.client_name,
-            tool_calls_count: metadata.tool_calls_count || (values?.tool_calls?.length || 0),
-            has_handoff: hasHandoff,
-            errors_count: metadata.errors_count || 0,
+        // Tentar extrair user input de diferentes lugares
+        let userInput = ''
+        if (inputs.messages && Array.isArray(inputs.messages) && inputs.messages.length > 0) {
+          const firstMessage = inputs.messages[0]
+          userInput = typeof firstMessage === 'string' ? firstMessage : (firstMessage.content || firstMessage.text || '')
+        } else if (inputs.input) {
+          userInput = typeof inputs.input === 'string' ? inputs.input : JSON.stringify(inputs.input)
+        } else if (inputs.query) {
+          userInput = inputs.query
+        } else if (metadata.user_input) {
+          userInput = metadata.user_input
+        }
+        
+        // Determinar se há handoff
+        const hasHandoff = metadata.has_handoff === true || 
+                          metadata.handoff === true ||
+                          (metadata.next && Array.isArray(metadata.next) && metadata.next.some((n: any) => String(n).includes('handoff')))
+        
+        // Contar tool calls
+        let toolCallsCount = 0
+        if (run.child_runs && Array.isArray(run.child_runs)) {
+          toolCallsCount = run.child_runs.filter((r: any) => r.run_type === 'tool').length
+        } else if (metadata.tool_calls_count) {
+          toolCallsCount = metadata.tool_calls_count
+        }
+        
+        // Status do run
+        const status = run.status || (run.error ? 'error' : 'completed')
+        const hasError = status === 'error' || !!run.error
+        
+        // Criar trace
+        const trace: Trace = {
+          trace_id: traceId,
+          timestamp: run.start_time || run.created_at || run.timestamp || new Date().toISOString(),
+          user_input: userInput || 'Sem input',
+          intent: metadata.intent || inputs.intent,
+          route: metadata.route || inputs.route,
+          status: status,
+          client_id: metadata.client_id,
+          client_name: metadata.client_name,
+          tool_calls_count: toolCallsCount,
+          has_handoff: hasHandoff,
+          errors_count: hasError ? 1 : 0,
+        }
+        
+        traces.push(trace)
+        
+        // Se há handoff, criar entrada de handoff
+        if (hasHandoff) {
+          const handoff: Handoff = {
+            trace_id: trace.trace_id,
+            timestamp: trace.timestamp,
+            reason: metadata.handoff_reason || metadata.reason || 'Regra de handoff acionada',
+            rule: metadata.handoff_rule || metadata.rule || 'Regra desconhecida',
+            client_id: trace.client_id,
+            client_name: trace.client_name,
+            user_input: trace.user_input,
+            intent: trace.intent,
+            route: trace.route,
           }
-          
-          traces.push(trace)
-          
-          if (hasHandoff) {
-            const handoff: Handoff = {
-              trace_id: trace.trace_id,
-              timestamp: trace.timestamp,
-              reason: metadata.handoff_reason || metadata.reason || 'Regra de handoff acionada',
-              rule: metadata.handoff_rule || metadata.rule || 'Regra desconhecida',
-              client_id: trace.client_id,
-              client_name: trace.client_name,
-              user_input: trace.user_input,
-              intent: trace.intent,
-              route: trace.route,
-            }
-            handoffs.push(handoff)
-          }
-        } else {
-          threadRuns.forEach((run: any, idx: number) => {
-          // Extrair informações do run e state
-          const metadata = run.metadata || threadState?.metadata || thread.metadata || {}
-          const values = threadState?.values || {}
-          const userInput = values?.messages?.[0]?.content || values?.input || metadata.user_input || ''
-          
-          // Determinar se há handoff
-          const hasHandoff = metadata.has_handoff === true || 
-                            metadata.handoff === true ||
-                            (values?.next && Array.isArray(values.next) && values.next.some((n: any) => String(n).includes('handoff')))
-          
-          // Criar trace
-          const trace: Trace = {
-            trace_id: run.run_id || `${thread.thread_id}-${idx}`,
-            timestamp: run.created_at || run.updated_at || thread.created_at || new Date().toISOString(),
-            user_input: userInput,
-            intent: metadata.intent || values?.intent,
-            route: metadata.route || values?.route,
-            status: run.status || 'unknown',
-            client_id: metadata.client_id || thread.metadata?.client_id,
-            client_name: metadata.client_name || thread.metadata?.client_name,
-            tool_calls_count: metadata.tool_calls_count || (values?.tool_calls?.length || 0),
-            has_handoff: hasHandoff,
-            errors_count: run.status === 'error' ? 1 : (metadata.errors_count || 0),
-          }
-          
-          traces.push(trace)
-          
-          // Se há handoff, criar entrada de handoff
-          if (hasHandoff) {
-            const handoff: Handoff = {
-              trace_id: trace.trace_id,
-              timestamp: trace.timestamp,
-              reason: metadata.handoff_reason || metadata.reason || 'Regra de handoff acionada',
-              rule: metadata.handoff_rule || metadata.rule || 'Regra desconhecida',
-              client_id: trace.client_id,
-              client_name: trace.client_name,
-              user_input: trace.user_input,
-              intent: trace.intent,
-              route: trace.route,
-            }
-            handoffs.push(handoff)
-          }
-          })
+          handoffs.push(handoff)
         }
       })
       
@@ -461,7 +373,7 @@ export default function PainelDoAgente() {
       setClients(data.clients)
       
       if (data.traces.length === 0 && data.summary.total_traces === 0) {
-        setError('Nenhum dado encontrado. Verifique se há threads e runs no LangSmith.')
+        setError('Nenhum dado encontrado. Verifique se há runs no LangSmith.')
       }
     } catch (error: any) {
       console.error('Erro ao carregar dados iniciais:', error)
