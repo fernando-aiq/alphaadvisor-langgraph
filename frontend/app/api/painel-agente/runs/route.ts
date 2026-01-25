@@ -4,12 +4,13 @@ export const dynamic = 'force-dynamic'
 
 function getLangSmithConfig() {
   const apiKey = process.env.NEXT_PUBLIC_LANGSMITH_API_KEY?.trim() || ''
+  const projectName = process.env.NEXT_PUBLIC_LANGSMITH_PROJECT_NAME?.trim() || ''
   
   if (!apiKey) {
     throw new Error('NEXT_PUBLIC_LANGSMITH_API_KEY não configurada')
   }
   
-  return { apiKey }
+  return { apiKey, projectName }
 }
 
 function createHeaders(apiKey: string): HeadersInit {
@@ -25,7 +26,7 @@ function createHeaders(apiKey: string): HeadersInit {
  */
 export async function GET(request: NextRequest) {
   try {
-    const { apiKey } = getLangSmithConfig()
+    const { apiKey, projectName } = getLangSmithConfig()
     const searchParams = request.nextUrl.searchParams
     
     // Construir query params para a API do LangSmith
@@ -42,9 +43,10 @@ export async function GET(request: NextRequest) {
       queryParams.append('offset', searchParams.get('offset')!)
     }
     
-    // Filtros opcionais
-    if (searchParams.get('project_name')) {
-      queryParams.append('project_name', searchParams.get('project_name')!)
+    // Project name - usar da query string ou variável de ambiente
+    const finalProjectName = searchParams.get('project_name') || projectName
+    if (finalProjectName) {
+      queryParams.append('project_name', finalProjectName)
     }
     
     if (searchParams.get('start_time')) {
@@ -87,10 +89,27 @@ export async function GET(request: NextRequest) {
     const data = await response.json()
     
     // A API do LangSmith retorna runs em diferentes formatos
-    // Pode ser um array direto ou um objeto com propriedade 'runs'
-    const runs = Array.isArray(data) ? data : (data.runs || data.data || [])
+    // Pode ser um array direto ou um objeto com propriedade 'runs' ou 'data'
+    let runs: any[] = []
     
-    console.log('[Painel Agente API] Runs encontrados:', runs.length)
+    if (Array.isArray(data)) {
+      runs = data
+    } else if (data.runs && Array.isArray(data.runs)) {
+      runs = data.runs
+    } else if (data.data && Array.isArray(data.data)) {
+      runs = data.data
+    } else if (data.items && Array.isArray(data.items)) {
+      runs = data.items
+    }
+    
+    console.log('[Painel Agente API] Resposta do LangSmith:', {
+      dataType: Array.isArray(data) ? 'array' : typeof data,
+      hasRuns: !!(data as any).runs,
+      hasData: !!(data as any).data,
+      hasItems: !!(data as any).items,
+      runsCount: runs.length,
+      sampleKeys: !Array.isArray(data) ? Object.keys(data).slice(0, 5) : []
+    })
     
     return NextResponse.json({ runs })
   } catch (error: any) {

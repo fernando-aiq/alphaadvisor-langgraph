@@ -242,13 +242,13 @@ export function Thread() {
               </>
             }
             footer={
-              <div className="sticky flex flex-col bottom-0 bg-white w-full">
+              <div className="sticky flex flex-col bottom-0 bg-white w-full px-4">
                 <ScrollToBottom className="absolute bottom-full left-1/2 -translate-x-1/2 mb-4 animate-in fade-in-0 zoom-in-95" />
 
-                <div className="bg-muted rounded-2xl border shadow-xs mx-auto mb-8 w-full max-w-3xl relative z-10 px-4">
+                <div className="bg-muted rounded-2xl border shadow-xs mx-auto mb-8 w-full max-w-3xl relative z-10">
                   <form
                     onSubmit={handleSubmit}
-                    className="grid grid-rows-[1fr_auto] gap-2 max-w-3xl mx-auto"
+                    className="grid grid-rows-[1fr_auto] gap-2 w-full p-4"
                   >
                     <textarea
                       value={input}
@@ -267,7 +267,7 @@ export function Thread() {
                         }
                       }}
                       placeholder="Digite sua mensagem..."
-                      className="p-3.5 pb-0 border-none bg-transparent field-sizing-content shadow-none ring-0 outline-none focus:outline-none focus:ring-0 resize-none"
+                      className="p-3.5 pb-0 border-none bg-transparent field-sizing-content shadow-none ring-0 outline-none focus:outline-none focus:ring-0 resize-none w-full"
                     />
 
                     <div className="flex items-center justify-between p-2 pt-4">
