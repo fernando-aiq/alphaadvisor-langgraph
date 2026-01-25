@@ -73,15 +73,41 @@ export async function GET(request: NextRequest) {
         status: response.status,
         statusText: response.statusText,
         errorText,
+        url: langSmithUrl,
+        hasProjectName: !!finalProjectName,
       })
       
-      // Se for 404 ou 405, retornar array vazio (endpoint pode não existir)
+      // Se for 404 ou 405, tentar endpoint de traces como fallback
       if (response.status === 404 || response.status === 405) {
-        return NextResponse.json({ runs: [] })
+        console.log('[Painel Agente API] Endpoint runs não disponível, tentando traces...')
+        try {
+          const tracesUrl = `https://api.smith.langchain.com/v1/traces${queryParams.toString() ? `?${queryParams}` : ''}`
+          const tracesResponse = await fetch(tracesUrl, {
+            method: 'GET',
+            headers: createHeaders(apiKey),
+          })
+          
+          if (tracesResponse.ok) {
+            const tracesData = await tracesResponse.json()
+            let runs: any[] = []
+            if (Array.isArray(tracesData)) {
+              runs = tracesData
+            } else if (tracesData.traces && Array.isArray(tracesData.traces)) {
+              runs = tracesData.traces
+            } else if (tracesData.data && Array.isArray(tracesData.data)) {
+              runs = tracesData.data
+            }
+            console.log('[Painel Agente API] Traces encontrados via fallback:', runs.length)
+            return NextResponse.json({ runs })
+          }
+        } catch (traceError) {
+          console.warn('[Painel Agente API] Erro ao buscar traces como fallback:', traceError)
+        }
+        return NextResponse.json({ runs: [], debug: { error: errorText, status: response.status } })
       }
       
       return NextResponse.json(
-        { error: 'Failed to fetch runs from LangSmith', details: errorText },
+        { error: 'Failed to fetch runs from LangSmith', details: errorText, runs: [] },
         { status: response.status }
       )
     }
@@ -100,6 +126,8 @@ export async function GET(request: NextRequest) {
       runs = data.data
     } else if (data.items && Array.isArray(data.items)) {
       runs = data.items
+    } else if (data.results && Array.isArray(data.results)) {
+      runs = data.results
     }
     
     console.log('[Painel Agente API] Resposta do LangSmith:', {
@@ -107,9 +135,40 @@ export async function GET(request: NextRequest) {
       hasRuns: !!(data as any).runs,
       hasData: !!(data as any).data,
       hasItems: !!(data as any).items,
+      hasResults: !!(data as any).results,
       runsCount: runs.length,
-      sampleKeys: !Array.isArray(data) ? Object.keys(data).slice(0, 5) : []
+      sampleKeys: !Array.isArray(data) ? Object.keys(data).slice(0, 10) : [],
+      sampleData: !Array.isArray(data) ? JSON.stringify(data).substring(0, 500) : 'array'
     })
+    
+    // Se não encontrou runs e a resposta foi bem-sucedida mas vazia, tentar endpoint de traces
+    if (runs.length === 0 && response.ok) {
+      console.log('[Painel Agente API] Nenhum run encontrado, tentando endpoint de traces...')
+      try {
+        const tracesUrl = `https://api.smith.langchain.com/v1/traces${queryParams.toString() ? `?${queryParams}` : ''}`
+        console.log('[Painel Agente API] Tentando traces:', tracesUrl)
+        
+        const tracesResponse = await fetch(tracesUrl, {
+          method: 'GET',
+          headers: createHeaders(apiKey),
+        })
+        
+        if (tracesResponse.ok) {
+          const tracesData = await tracesResponse.json()
+          // Traces podem ser convertidos para runs
+          if (Array.isArray(tracesData)) {
+            runs = tracesData
+          } else if (tracesData.traces && Array.isArray(tracesData.traces)) {
+            runs = tracesData.traces
+          } else if (tracesData.data && Array.isArray(tracesData.data)) {
+            runs = tracesData.data
+          }
+          console.log('[Painel Agente API] Traces encontrados:', runs.length)
+        }
+      } catch (traceError) {
+        console.warn('[Painel Agente API] Erro ao buscar traces:', traceError)
+      }
+    }
     
     return NextResponse.json({ runs })
   } catch (error: any) {
