@@ -357,7 +357,7 @@ export function Thread() {
                             htmlFor="render-tool-calls"
                             className="text-sm font-medium text-gray-900"
                           >
-                            Ocultar Chamadas de Ferramentas
+                            Ocultar Tools
                           </Label>
                         </div>
                       </div>

@@ -13,7 +13,8 @@ import {
   FiShield,
   FiActivity,
   FiLink,
-  FiZap
+  FiZap,
+  FiCode
 } from 'react-icons/fi'
 import '../globals.css'
 
@@ -21,6 +22,7 @@ const clienteMenuItems = [
   { href: '/dashboard', label: 'Dashboard', icon: FiLayout },
   { href: '/chat', label: 'Chat', icon: FiMessageSquare },
   { href: '/chat-agent', label: 'Chat Avançado', icon: FiZap },
+  { href: '/studio', label: 'Studio', icon: FiCode, isAdmin: true },
   { href: '/oportunidades', label: 'Oportunidades', icon: FiTrendingUp },
   { href: '/alertas', label: 'Alertas', icon: FiBell },
   { href: '/conexoes', label: 'Conexões (Open Finance)', icon: FiLink },
