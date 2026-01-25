@@ -145,6 +145,11 @@ body {
   height: 100vh;
   overflow-y: auto;
   z-index: 100;
+  transition: width 0.3s ease;
+}
+
+.sidebar.minimized {
+  width: 64px;
 }
 
 .sidebar-header {
@@ -153,11 +158,26 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  transition: padding 0.3s ease;
+}
+
+.sidebar.minimized .sidebar-header {
+  padding: 1.5rem 0.75rem;
+  justify-content: center;
 }
 
 .sidebar-header h2 {
   font-size: 1.25rem;
   color: var(--text-primary);
+  transition: opacity 0.3s ease;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.sidebar.minimized .sidebar-header h2 {
+  opacity: 0;
+  width: 0;
+  margin: 0;
 }
 
 .sidebar-nav {
@@ -172,11 +192,21 @@ body {
   text-decoration: none;
   transition: all 0.2s ease;
   gap: 0.75rem;
+  position: relative;
+}
+
+.sidebar.minimized .sidebar-item {
+  padding: 0.75rem;
+  justify-content: center;
 }
 
 .sidebar-item:hover {
   background: var(--bg-primary);
   color: var(--primary);
+}
+
+.sidebar.minimized .sidebar-item:hover {
+  background: var(--bg-primary);
 }
 
 .sidebar-item.active {
@@ -186,8 +216,25 @@ body {
   font-weight: 600;
 }
 
+.sidebar.minimized .sidebar-item.active {
+  border-right: none;
+  border-left: 3px solid var(--primary);
+}
+
 .sidebar-icon {
   font-size: 1.25rem;
+  flex-shrink: 0;
+}
+
+.sidebar-item span {
+  white-space: nowrap;
+  transition: opacity 0.3s ease;
+}
+
+.sidebar.minimized .sidebar-item span {
+  opacity: 0;
+  width: 0;
+  overflow: hidden;
 }
 
 .sidebar-badge {
@@ -202,6 +249,14 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.5px;
   margin-left: auto;
+  transition: opacity 0.3s ease;
+}
+
+.sidebar.minimized .sidebar-badge {
+  opacity: 0;
+  width: 0;
+  overflow: hidden;
+  margin: 0;
 }
 
 .main-content {
@@ -210,6 +265,12 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  transition: margin-left 0.3s ease;
+}
+
+.sidebar.minimized ~ .main-content,
+.app-layout:has(.sidebar.minimized) .main-content {
+  margin-left: 64px;
 }
 
 .main-header {
