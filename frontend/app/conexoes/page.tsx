@@ -71,8 +71,14 @@ export default function Conexoes() {
       setConexoes(response.data?.conexoes || [])
     } catch (error: any) {
       console.error('[Conexões] Erro ao carregar conexões:', error)
-      setMessage({ type: 'error', text: 'Erro ao carregar conexões. Tente novamente.' })
-      setTimeout(() => setMessage(null), 5000)
+      // Se for erro 403 ou 404, o endpoint não existe - usar dados vazios
+      if (error.response?.status === 403 || error.response?.status === 404) {
+        console.warn('[Conexões] Endpoint não disponível, usando dados vazios')
+        setConexoes([])
+      } else {
+        setMessage({ type: 'error', text: 'Erro ao carregar conexões. O endpoint pode não estar disponível.' })
+        setTimeout(() => setMessage(null), 5000)
+      }
     } finally {
       setLoading(false)
     }
