@@ -1,30 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-
-function getLangSmithConfig() {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL?.trim() || ''
-  const apiKey = process.env.NEXT_PUBLIC_LANGSMITH_API_KEY?.trim() || ''
-  
-  if (!apiUrl) {
-    throw new Error('NEXT_PUBLIC_API_URL não configurada')
-  }
-  
-  if (!apiKey) {
-    throw new Error('NEXT_PUBLIC_LANGSMITH_API_KEY não configurada')
-  }
-  
-  return { apiUrl, apiKey }
-}
-
-function createHeaders(apiKey: string): HeadersInit {
-  return {
-    'Content-Type': 'application/json',
-    'x-api-key': apiKey,
-  }
-}
+import { createLangGraphClient } from '@/app/lib/langgraph-client'
 
 /**
  * GET /api/studio/threads/[threadId]/runs
- * Lista runs de uma thread
+ * Lista runs de uma thread usando SDK
  */
 export async function GET(
   request: NextRequest,
@@ -32,35 +11,35 @@ export async function GET(
 ) {
   try {
     const { threadId } = await params
-    const { apiUrl, apiKey } = getLangSmithConfig()
+    const client = createLangGraphClient()
     const searchParams = request.nextUrl.searchParams
     
-    // Construir query params
-    const queryParams = new URLSearchParams()
-    if (searchParams.get('limit')) queryParams.append('limit', searchParams.get('limit')!)
-    if (searchParams.get('offset')) queryParams.append('offset', searchParams.get('offset')!)
+    const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')!) : undefined
+    const offset = searchParams.get('offset') ? parseInt(searchParams.get('offset')!) : undefined
     
-    const url = `${apiUrl}/threads/${threadId}/runs${queryParams.toString() ? `?${queryParams}` : ''}`
-    
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: createHeaders(apiKey),
-    })
-    
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => 'Unknown error')
+    try {
+      // Usar SDK para listar runs
+      const runs = await client.runs.list(threadId, {
+        limit,
+        offset,
+      })
+      
+      // Normalizar resposta para manter compatibilidade
+      const runsArray = Array.isArray(runs) ? runs : []
+      
+      return NextResponse.json({ runs: runsArray })
+    } catch (sdkError: any) {
+      console.error('[Studio API] Erro ao listar runs via SDK:', sdkError)
+      
+      const statusCode = sdkError.status || sdkError.statusCode || 500
       return NextResponse.json(
-        { error: 'Failed to fetch runs', details: errorText },
-        { status: response.status }
+        { 
+          error: 'Failed to fetch runs', 
+          details: sdkError.message || 'Unknown error' 
+        },
+        { status: statusCode }
       )
     }
-    
-    const data = await response.json()
-    
-    // Normalizar resposta
-    const runs = Array.isArray(data) ? data : (data.runs || [])
-    
-    return NextResponse.json({ runs })
   } catch (error: any) {
     console.error('[Studio API] Erro ao listar runs:', error)
     return NextResponse.json(
@@ -72,7 +51,7 @@ export async function GET(
 
 /**
  * POST /api/studio/threads/[threadId]/runs
- * Cria um novo run em uma thread
+ * Cria um novo run em uma thread usando SDK
  */
 export async function POST(
   request: NextRequest,
@@ -80,25 +59,28 @@ export async function POST(
 ) {
   try {
     const { threadId } = await params
-    const { apiUrl, apiKey } = getLangSmithConfig()
+    const client = createLangGraphClient()
     const body = await request.json()
     
-    const response = await fetch(`${apiUrl}/threads/${threadId}/runs`, {
-      method: 'POST',
-      headers: createHeaders(apiKey),
-      body: JSON.stringify(body),
-    })
-    
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => 'Unknown error')
+    try {
+      // Usar SDK para criar run
+      // O SDK pode ter diferentes métodos dependendo da versão
+      // Tentar usar create ou stream dependendo do que está disponível
+      const run = await client.runs.create(threadId, body)
+      
+      return NextResponse.json(run)
+    } catch (sdkError: any) {
+      console.error('[Studio API] Erro ao criar run via SDK:', sdkError)
+      
+      const statusCode = sdkError.status || sdkError.statusCode || 500
       return NextResponse.json(
-        { error: 'Failed to create run', details: errorText },
-        { status: response.status }
+        { 
+          error: 'Failed to create run', 
+          details: sdkError.message || 'Unknown error' 
+        },
+        { status: statusCode }
       )
     }
-    
-    const data = await response.json()
-    return NextResponse.json(data)
   } catch (error: any) {
     console.error('[Studio API] Erro ao criar run:', error)
     return NextResponse.json(

@@ -50,16 +50,18 @@ export function ThreadProvider({ children }: { children: ReactNode }) {
 
   const getThreads = useCallback(async (): Promise<Thread[]> => {
     if (!finalApiUrl || !finalAssistantId) return [];
-    const client = createClient(finalApiUrl, getApiKey() ?? undefined);
-
-    const threads = await client.threads.search({
-      metadata: {
-        ...getThreadSearchMetadata(finalAssistantId),
-      },
-      limit: 100,
-    });
-
-    return threads;
+    
+    try {
+      // Usar endpoint da API route em vez de search direto
+      const response = await fetch(`/api/studio/threads?limit=100`);
+      if (!response.ok) return [];
+      
+      const data = await response.json();
+      return data.threads || [];
+    } catch (error) {
+      console.error('Erro ao buscar threads:', error);
+      return [];
+    }
   }, [finalApiUrl, finalAssistantId]);
 
   const value = {

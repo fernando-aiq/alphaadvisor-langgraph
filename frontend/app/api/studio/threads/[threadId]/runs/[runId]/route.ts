@@ -1,30 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
-
-function getLangSmithConfig() {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL?.trim() || ''
-  const apiKey = process.env.NEXT_PUBLIC_LANGSMITH_API_KEY?.trim() || ''
-  
-  if (!apiUrl) {
-    throw new Error('NEXT_PUBLIC_API_URL não configurada')
-  }
-  
-  if (!apiKey) {
-    throw new Error('NEXT_PUBLIC_LANGSMITH_API_KEY não configurada')
-  }
-  
-  return { apiUrl, apiKey }
-}
-
-function createHeaders(apiKey: string): HeadersInit {
-  return {
-    'Content-Type': 'application/json',
-    'x-api-key': apiKey,
-  }
-}
+import { createLangGraphClient } from '@/app/lib/langgraph-client'
 
 /**
  * GET /api/studio/threads/[threadId]/runs/[runId]
- * Obtém detalhes de um run específico
+ * Obtém detalhes de um run específico usando SDK
  */
 export async function GET(
   request: NextRequest,
@@ -32,23 +11,25 @@ export async function GET(
 ) {
   try {
     const { threadId, runId } = await params
-    const { apiUrl, apiKey } = getLangSmithConfig()
+    const client = createLangGraphClient()
     
-    const response = await fetch(`${apiUrl}/threads/${threadId}/runs/${runId}`, {
-      method: 'GET',
-      headers: createHeaders(apiKey),
-    })
-    
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => 'Unknown error')
+    try {
+      // Usar SDK para obter detalhes do run
+      const run = await client.runs.get(threadId, runId)
+      
+      return NextResponse.json(run)
+    } catch (sdkError: any) {
+      console.error('[Studio API] Erro ao obter detalhes do run via SDK:', sdkError)
+      
+      const statusCode = sdkError.status || sdkError.statusCode || 500
       return NextResponse.json(
-        { error: 'Failed to fetch run details', details: errorText },
-        { status: response.status }
+        { 
+          error: 'Failed to fetch run details', 
+          details: sdkError.message || 'Unknown error' 
+        },
+        { status: statusCode }
       )
     }
-    
-    const data = await response.json()
-    return NextResponse.json(data)
   } catch (error: any) {
     console.error('[Studio API] Erro ao obter detalhes do run:', error)
     return NextResponse.json(

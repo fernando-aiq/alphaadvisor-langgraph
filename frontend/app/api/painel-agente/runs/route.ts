@@ -1,178 +1,161 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createLangGraphClient } from '@/app/lib/langgraph-client'
 
 export const dynamic = 'force-dynamic'
 
-function getLangSmithConfig() {
-  const apiKey = process.env.NEXT_PUBLIC_LANGSMITH_API_KEY?.trim() || ''
-  const projectName = process.env.NEXT_PUBLIC_LANGSMITH_PROJECT_NAME?.trim() || ''
-  
-  if (!apiKey) {
-    throw new Error('NEXT_PUBLIC_LANGSMITH_API_KEY não configurada')
-  }
-  
-  return { apiKey, projectName }
-}
-
-function createHeaders(apiKey: string): HeadersInit {
-  return {
-    'Content-Type': 'application/json',
-    'x-api-key': apiKey,
-  }
-}
-
 /**
  * GET /api/painel-agente/runs
- * Busca runs diretamente do LangSmith usando a API REST
+ * Busca runs do LangGraph Deployment usando SDK
+ * 
+ * Estratégia:
+ * 1. Buscar todas as threads do deployment usando SDK
+ * 2. Para cada thread, buscar seus runs usando SDK
+ * 3. Agregar todos os runs em uma lista única
+ * 
+ * VERSÃO: 3.0 - Usa LangGraph SDK
  */
 export async function GET(request: NextRequest) {
   try {
-    const { apiKey, projectName } = getLangSmithConfig()
+    const client = createLangGraphClient()
     const searchParams = request.nextUrl.searchParams
+    const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')!) : 1000
     
-    // Construir query params para a API do LangSmith
-    const queryParams = new URLSearchParams()
-    
-    // Parâmetros suportados pela API do LangSmith
-    if (searchParams.get('limit')) {
-      queryParams.append('limit', searchParams.get('limit')!)
-    } else {
-      queryParams.append('limit', '1000') // Default
-    }
-    
-    if (searchParams.get('offset')) {
-      queryParams.append('offset', searchParams.get('offset')!)
-    }
-    
-    // Project name - usar da query string ou variável de ambiente
-    const finalProjectName = searchParams.get('project_name') || projectName
-    if (finalProjectName) {
-      queryParams.append('project_name', finalProjectName)
-    }
-    
-    if (searchParams.get('start_time')) {
-      queryParams.append('start_time', searchParams.get('start_time')!)
-    }
-    
-    if (searchParams.get('end_time')) {
-      queryParams.append('end_time', searchParams.get('end_time')!)
-    }
-    
-    // URL da API do LangSmith
-    const langSmithUrl = `https://api.smith.langchain.com/v1/runs${queryParams.toString() ? `?${queryParams}` : ''}`
-    
-    console.log('[Painel Agente API] Buscando runs do LangSmith:', langSmithUrl)
-    
-    const response = await fetch(langSmithUrl, {
-      method: 'GET',
-      headers: createHeaders(apiKey),
+    console.log('[Painel Agente API] ✅ VERSÃO 3.0 - Usando LangGraph SDK:', {
+      limit,
+      timestamp: new Date().toISOString(),
     })
     
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => 'Unknown error')
-      console.error('[Painel Agente API] Erro ao buscar runs:', {
-        status: response.status,
-        statusText: response.statusText,
-        errorText,
-        url: langSmithUrl,
-        hasProjectName: !!finalProjectName,
+    // Passo 1: Buscar todas as threads usando SDK
+    let threads: any[] = []
+    
+    try {
+      // Remover metadata: null - SDK não aceita null, usar objeto vazio ou omitir
+      threads = await client.threads.search({
+        limit: limit,
+        offset: 0,
       })
       
-      // Se for 404 ou 405, tentar endpoint de traces como fallback
-      if (response.status === 404 || response.status === 405) {
-        console.log('[Painel Agente API] Endpoint runs não disponível, tentando traces...')
-        try {
-          const tracesUrl = `https://api.smith.langchain.com/v1/traces${queryParams.toString() ? `?${queryParams}` : ''}`
-          const tracesResponse = await fetch(tracesUrl, {
-            method: 'GET',
-            headers: createHeaders(apiKey),
-          })
-          
-          if (tracesResponse.ok) {
-            const tracesData = await tracesResponse.json()
-            let runs: any[] = []
-            if (Array.isArray(tracesData)) {
-              runs = tracesData
-            } else if (tracesData.traces && Array.isArray(tracesData.traces)) {
-              runs = tracesData.traces
-            } else if (tracesData.data && Array.isArray(tracesData.data)) {
-              runs = tracesData.data
-            }
-            console.log('[Painel Agente API] Traces encontrados via fallback:', runs.length)
-            return NextResponse.json({ runs })
-          }
-        } catch (traceError) {
-          console.warn('[Painel Agente API] Erro ao buscar traces como fallback:', traceError)
-        }
-        return NextResponse.json({ runs: [], debug: { error: errorText, status: response.status } })
+      // Normalizar para array - SDK pode retornar array direto ou objeto com threads
+      if (Array.isArray(threads)) {
+        threads = threads
+      } else if (threads && typeof threads === 'object') {
+        threads = threads.threads || threads.data || []
+      } else {
+        threads = []
       }
       
-      return NextResponse.json(
-        { error: 'Failed to fetch runs from LangSmith', details: errorText, runs: [] },
-        { status: response.status }
-      )
+      console.log('[Painel Agente API] Threads encontradas via SDK:', threads.length)
+    } catch (threadsError: any) {
+      console.error('[Painel Agente API] Erro ao buscar threads via SDK:', {
+        message: threadsError.message,
+        stack: threadsError.stack,
+        status: threadsError.status || threadsError.statusCode,
+        name: threadsError.name,
+      })
+      // Retornar array vazio em caso de erro
+      return NextResponse.json({ runs: [] })
     }
     
-    const data = await response.json()
-    
-    // A API do LangSmith retorna runs em diferentes formatos
-    // Pode ser um array direto ou um objeto com propriedade 'runs' ou 'data'
-    let runs: any[] = []
-    
-    if (Array.isArray(data)) {
-      runs = data
-    } else if (data.runs && Array.isArray(data.runs)) {
-      runs = data.runs
-    } else if (data.data && Array.isArray(data.data)) {
-      runs = data.data
-    } else if (data.items && Array.isArray(data.items)) {
-      runs = data.items
-    } else if (data.results && Array.isArray(data.results)) {
-      runs = data.results
+    // Se não temos threads, retornar array vazio
+    if (threads.length === 0) {
+      console.log('[Painel Agente API] Nenhuma thread encontrada, retornando array vazio')
+      return NextResponse.json({ runs: [] })
     }
     
-    console.log('[Painel Agente API] Resposta do LangSmith:', {
-      dataType: Array.isArray(data) ? 'array' : typeof data,
-      hasRuns: !!(data as any).runs,
-      hasData: !!(data as any).data,
-      hasItems: !!(data as any).items,
-      hasResults: !!(data as any).results,
-      runsCount: runs.length,
-      sampleKeys: !Array.isArray(data) ? Object.keys(data).slice(0, 10) : [],
-      sampleData: !Array.isArray(data) ? JSON.stringify(data).substring(0, 500) : 'array'
-    })
+    // Passo 2: Buscar runs de cada thread usando SDK
+    const allRuns: any[] = []
     
-    // Se não encontrou runs e a resposta foi bem-sucedida mas vazia, tentar endpoint de traces
-    if (runs.length === 0 && response.ok) {
-      console.log('[Painel Agente API] Nenhum run encontrado, tentando endpoint de traces...')
-      try {
-        const tracesUrl = `https://api.smith.langchain.com/v1/traces${queryParams.toString() ? `?${queryParams}` : ''}`
-        console.log('[Painel Agente API] Tentando traces:', tracesUrl)
-        
-        const tracesResponse = await fetch(tracesUrl, {
-          method: 'GET',
-          headers: createHeaders(apiKey),
-        })
-        
-        if (tracesResponse.ok) {
-          const tracesData = await tracesResponse.json()
-          // Traces podem ser convertidos para runs
-          if (Array.isArray(tracesData)) {
-            runs = tracesData
-          } else if (tracesData.traces && Array.isArray(tracesData.traces)) {
-            runs = tracesData.traces
-          } else if (tracesData.data && Array.isArray(tracesData.data)) {
-            runs = tracesData.data
-          }
-          console.log('[Painel Agente API] Traces encontrados:', runs.length)
+    // Processar threads em paralelo (limitado a 10 por vez para não sobrecarregar)
+    const batchSize = 10
+    for (let i = 0; i < threads.length; i += batchSize) {
+      const batch = threads.slice(i, i + batchSize)
+      
+      const batchPromises = batch.map(async (thread: any) => {
+        // Validar thread_id antes de usar
+        const threadId = thread.thread_id || thread.id
+        if (!threadId || typeof threadId !== 'string') {
+          console.warn('[Painel Agente API] Thread sem thread_id válido:', thread)
+          return []
         }
-      } catch (traceError) {
-        console.warn('[Painel Agente API] Erro ao buscar traces:', traceError)
+        
+        try {
+          // Buscar runs e thread state em paralelo
+          const [runs, threadState] = await Promise.all([
+            client.runs.list(threadId, {
+              limit: 100,
+            }).catch(() => null),
+            client.threads.getState(threadId).catch(() => null)
+          ])
+          
+          // Normalizar para array - SDK pode retornar array direto ou objeto
+          let runsArray: any[] = []
+          if (runs) {
+            if (Array.isArray(runs)) {
+              runsArray = runs
+            } else if (runs && typeof runs === 'object') {
+              runsArray = runs.runs || runs.data || []
+            }
+          }
+          
+          // Extrair user_input do thread state
+          let userInput = ''
+          if (threadState?.values?.messages && Array.isArray(threadState.values.messages)) {
+            const firstHumanMessage = threadState.values.messages.find((m: any) => 
+              m.type === 'human' || m.role === 'user'
+            )
+            if (firstHumanMessage) {
+              // Extrair conteúdo da mensagem
+              if (typeof firstHumanMessage.content === 'string') {
+                userInput = firstHumanMessage.content
+              } else if (Array.isArray(firstHumanMessage.content)) {
+                // Se content é array, pegar o primeiro item de texto
+                const textContent = firstHumanMessage.content.find((c: any) => 
+                  c.type === 'text' || typeof c === 'string'
+                )
+                userInput = typeof textContent === 'string' ? textContent : (textContent?.text || '')
+              }
+            }
+          }
+          
+          // Adicionar thread_id e user_input a cada run
+          return runsArray.map((run: any) => ({
+            ...run,
+            thread_id: threadId,
+            user_input: userInput, // Adicionar user_input extraído do thread state
+          }))
+        } catch (error: any) {
+          console.error(`[Painel Agente API] Erro ao buscar runs da thread ${threadId} via SDK:`, {
+            message: error.message,
+            stack: error.stack,
+            status: error.status || error.statusCode,
+            threadId,
+          })
+          return []
+        }
+      })
+      
+      const batchResults = await Promise.all(batchPromises)
+      allRuns.push(...batchResults.flat())
+      
+      // Limitar total de runs
+      if (allRuns.length >= limit) {
+        break
       }
     }
+    
+    // Limitar resultados
+    const runs = allRuns.slice(0, limit)
+    
+    console.log('[Painel Agente API] Total de runs encontrados via SDK:', runs.length)
     
     return NextResponse.json({ runs })
   } catch (error: any) {
-    console.error('[Painel Agente API] Erro ao buscar runs do LangSmith:', error)
+    console.error('[Painel Agente API] Erro ao buscar runs:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name,
+      status: error.status || error.statusCode,
+    })
     return NextResponse.json(
       { 
         error: error.message || 'Internal server error',

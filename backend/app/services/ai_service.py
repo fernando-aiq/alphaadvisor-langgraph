@@ -203,7 +203,7 @@ class AIService:
             classe = (inv.get('classe') or "").lower()
             tipo = (inv.get('tipo') or "").lower()
             nome = (inv.get('nome') or "").lower()
-            if classe == "liquidez" or tipo == "liquidez" or "conta corrente" in nome or "poupança" in nome:
+            if classe == "liquidez" or tipo == "liquidez" or "conta corrente" in nome:
                 total += float(inv.get('valor', 0) or 0)
         return total
 

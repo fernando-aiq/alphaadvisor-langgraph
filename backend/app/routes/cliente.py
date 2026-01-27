@@ -69,7 +69,7 @@ CARTEIRA = {
         },
         {
             'id': 6,
-            'nome': 'Poupança',
+            'nome': 'Conta Corrente',
             'tipo': 'Liquidez',
             'valor': 12432.85,
             'rentabilidade': '0%',
@@ -119,7 +119,7 @@ CARTEIRA = {
             'rendaVariavel': 25000
         },
         {
-            'nome': 'Poupança',
+            'nome': 'Conta Corrente',
             'total': 12432.85,
             'rendaFixa': 0,
             'rendaVariavel': 0

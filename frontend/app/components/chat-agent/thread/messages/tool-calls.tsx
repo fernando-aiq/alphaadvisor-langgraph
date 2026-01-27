@@ -1,7 +1,7 @@
 import { AIMessage, ToolMessage } from "@langchain/langgraph-sdk";
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { ChevronDown, ChevronUp, ExternalLink } from "lucide-react";
 
 function isComplexValue(value: any): boolean {
   return Array.isArray(value) || (typeof value === "object" && value !== null);
@@ -24,7 +24,7 @@ export function ToolCalls({
             key={idx}
             className="border border-gray-200 rounded-lg overflow-hidden"
           >
-            <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+            <div className="bg-gray-50 px-4 py-2 border-b border-gray-200 flex items-center justify-between">
               <h3 className="font-medium text-gray-900">
                 {tc.name}
                 {tc.id && (
@@ -33,6 +33,18 @@ export function ToolCalls({
                   </code>
                 )}
               </h3>
+              {tc.id && (
+                <a
+                  href={`/trace/${tc.id}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 underline"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <ExternalLink className="w-3 h-3" />
+                  Ver trace
+                </a>
+              )}
             </div>
             {hasArgs ? (
               <table className="min-w-full divide-y divide-gray-200">

@@ -73,7 +73,7 @@ export default function ThreadHistory() {
   const isLargeScreen = useMediaQuery("(min-width: 1024px)");
   const [chatHistoryOpen, setChatHistoryOpen] = useQueryState(
     "chatHistoryOpen",
-    parseAsBoolean.withDefault(false),
+    parseAsBoolean.withDefault(true),
   );
 
   const { getThreads, threads, setThreads, threadsLoading, setThreadsLoading } =
@@ -86,32 +86,40 @@ export default function ThreadHistory() {
       .then(setThreads)
       .catch(console.error)
       .finally(() => setThreadsLoading(false));
-  }, []);
+  }, [getThreads, setThreads, setThreadsLoading]);
+
+  // Se chatHistoryOpen for false, não renderizar nada (será controlado pelo componente pai)
+  if (!chatHistoryOpen && isLargeScreen) {
+    return null;
+  }
 
   return (
     <>
-      <div className="hidden lg:flex flex-col border-r-[1px] border-slate-300 items-start justify-start gap-6 h-screen w-[300px] shrink-0 shadow-inner-right">
-        <div className="flex items-center justify-between w-full pt-1.5 px-4">
-          <Button
-            className="hover:bg-gray-100"
-            variant="ghost"
-            onClick={() => setChatHistoryOpen((p) => !p)}
-          >
-            {chatHistoryOpen ? (
-              <PanelRightOpen className="size-5" />
-            ) : (
-              <PanelRightClose className="size-5" />
-            )}
-          </Button>
+      <div className="hidden lg:flex flex-col border-r-[1px] border-slate-300 items-start justify-start gap-6 h-screen w-[300px] shrink-0 shadow-inner-right bg-white">
+        <div className="flex items-center justify-between w-full pt-1.5 px-4 border-b border-slate-200 pb-2">
           <h1 className="text-xl font-semibold tracking-tight">
             Thread History
           </h1>
+          <Button
+            className="hover:bg-gray-100"
+            variant="ghost"
+            size="sm"
+            onClick={() => setChatHistoryOpen(false)}
+          >
+            <PanelRightClose className="size-4" />
+          </Button>
         </div>
-        {threadsLoading ? (
-          <ThreadHistoryLoading />
-        ) : (
-          <ThreadList threads={threads} />
-        )}
+        <div className="flex-1 overflow-hidden w-full">
+          {threadsLoading ? (
+            <ThreadHistoryLoading />
+          ) : threads.length === 0 ? (
+            <div className="p-4 text-sm text-gray-500 text-center">
+              Nenhuma thread encontrada
+            </div>
+          ) : (
+            <ThreadList threads={threads} />
+          )}
+        </div>
       </div>
       <div className="lg:hidden">
         <Sheet
@@ -121,14 +129,20 @@ export default function ThreadHistory() {
             setChatHistoryOpen(open);
           }}
         >
-          <SheetContent side="left" className="lg:hidden flex">
+          <SheetContent side="left" className="lg:hidden flex flex-col">
             <SheetHeader>
               <SheetTitle>Thread History</SheetTitle>
             </SheetHeader>
-            <ThreadList
-              threads={threads}
-              onThreadClick={() => setChatHistoryOpen((o) => !o)}
-            />
+            <div className="flex-1 overflow-hidden">
+              {threadsLoading ? (
+                <ThreadHistoryLoading />
+              ) : (
+                <ThreadList
+                  threads={threads}
+                  onThreadClick={() => setChatHistoryOpen(false)}
+                />
+              )}
+            </div>
           </SheetContent>
         </Sheet>
       </div>

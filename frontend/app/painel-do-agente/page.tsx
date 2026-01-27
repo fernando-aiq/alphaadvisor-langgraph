@@ -209,16 +209,21 @@ export default function PainelDoAgente() {
         const outputs = run.outputs || {}
         
         // Tentar extrair user input de diferentes lugares
-        let userInput = ''
-        if (inputs.messages && Array.isArray(inputs.messages) && inputs.messages.length > 0) {
-          const firstMessage = inputs.messages[0]
-          userInput = typeof firstMessage === 'string' ? firstMessage : (firstMessage.content || firstMessage.text || '')
-        } else if (inputs.input) {
-          userInput = typeof inputs.input === 'string' ? inputs.input : JSON.stringify(inputs.input)
-        } else if (inputs.query) {
-          userInput = inputs.query
-        } else if (metadata.user_input) {
-          userInput = metadata.user_input
+        // Priorizar user_input que vem da API (extraído do thread state)
+        let userInput = run.user_input || ''
+        
+        // Fallback: tentar extrair de outras fontes se user_input não estiver disponível
+        if (!userInput) {
+          if (inputs.messages && Array.isArray(inputs.messages) && inputs.messages.length > 0) {
+            const firstMessage = inputs.messages[0]
+            userInput = typeof firstMessage === 'string' ? firstMessage : (firstMessage.content || firstMessage.text || '')
+          } else if (inputs.input) {
+            userInput = typeof inputs.input === 'string' ? inputs.input : JSON.stringify(inputs.input)
+          } else if (inputs.query) {
+            userInput = inputs.query
+          } else if (metadata.user_input) {
+            userInput = metadata.user_input
+          }
         }
         
         // Determinar se há handoff

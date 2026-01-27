@@ -35,16 +35,9 @@ interface TraceToolsViewerProps {
 }
 
 const getApiUrl = () => {
-  const fallbackUrl = 'http://localhost:8000'
-  if (typeof window === 'undefined') {
-    return process.env.NEXT_PUBLIC_API_URL || process.env.API_URL || fallbackUrl
-  }
-  const isVercel = window.location.hostname.includes('vercel.app') ||
-                   window.location.hostname.includes('vercel.com')
-  if (isVercel) {
-    return process.env.NEXT_PUBLIC_API_URL || ''
-  }
-  return process.env.NEXT_PUBLIC_API_URL || process.env.API_URL || 'http://localhost:8000'
+  // Para endpoints de trace, sempre usar API routes do Next.js (relativo)
+  // Não usar NEXT_PUBLIC_API_URL que é para LangGraph Deployment
+  return ''
 }
 
 const getToolDescription = (toolName: string): string => {

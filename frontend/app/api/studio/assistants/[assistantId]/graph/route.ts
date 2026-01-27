@@ -1,30 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
-
-function getLangSmithConfig() {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL?.trim() || ''
-  const apiKey = process.env.NEXT_PUBLIC_LANGSMITH_API_KEY?.trim() || ''
-  
-  if (!apiUrl) {
-    throw new Error('NEXT_PUBLIC_API_URL não configurada')
-  }
-  
-  if (!apiKey) {
-    throw new Error('NEXT_PUBLIC_LANGSMITH_API_KEY não configurada')
-  }
-  
-  return { apiUrl, apiKey }
-}
-
-function createHeaders(apiKey: string): HeadersInit {
-  return {
-    'Content-Type': 'application/json',
-    'x-api-key': apiKey,
-  }
-}
+import { createLangGraphClient, getLangGraphConfig } from '@/app/lib/langgraph-client'
 
 /**
  * GET /api/studio/assistants/[assistantId]/graph
  * Obtém a estrutura do grafo de um assistente do LangGraph Deployment
+ * Tenta SDK primeiro, depois HTTP direto, depois fallback padrão
  */
 export async function GET(
   request: NextRequest,
@@ -32,32 +12,65 @@ export async function GET(
 ) {
   try {
     const { assistantId } = await params
-    const { apiUrl, apiKey } = getLangSmithConfig()
+    const client = createLangGraphClient()
+    const { apiUrl, apiKey } = getLangGraphConfig()
     
-    const response = await fetch(`${apiUrl}/assistants/${assistantId}/graph`, {
-      method: 'GET',
-      headers: createHeaders(apiKey),
-    })
-    
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => 'Unknown error')
+    // Estratégia 1: Tentar obter via SDK
+    try {
+      const assistant = await client.assistants.get(assistantId)
       
-      // Se endpoint não existir, retornar estrutura padrão baseada no grafo conhecido
-      if (response.status === 404) {
-        console.warn(`[Studio API] Endpoint /assistants/${assistantId}/graph não encontrado, usando estrutura padrão`)
-        return NextResponse.json(getDefaultGraphStructure(assistantId))
+      // Se o assistant tiver estrutura de grafo, retornar
+      if (assistant && (assistant as any).graph) {
+        console.log(`[Studio API] Grafo obtido via SDK para assistant ${assistantId}`)
+        return NextResponse.json((assistant as any).graph)
       }
       
-      return NextResponse.json(
-        { error: 'Failed to fetch graph structure', details: errorText },
-        { status: response.status }
-      )
+      console.log(`[Studio API] Assistant ${assistantId} obtido via SDK mas sem estrutura de grafo, tentando HTTP direto`)
+    } catch (sdkError: any) {
+      console.warn('[Studio API] Erro ao obter assistant via SDK, tentando HTTP direto:', {
+        message: sdkError.message,
+        status: sdkError.status || sdkError.statusCode,
+      })
     }
     
-    const data = await response.json()
-    return NextResponse.json(data)
+    // Estratégia 2: Tentar HTTP direto para endpoint /graph
+    try {
+      const graphUrl = `${apiUrl}/assistants/${assistantId}/graph`
+      const headers: HeadersInit = {
+        'Content-Type': 'application/json',
+      }
+      
+      if (apiKey) {
+        headers['x-api-key'] = apiKey
+      }
+      
+      const response = await fetch(graphUrl, {
+        method: 'GET',
+        headers,
+      })
+      
+      if (response.ok) {
+        const graphData = await response.json()
+        console.log(`[Studio API] Grafo obtido via HTTP direto para assistant ${assistantId}`)
+        return NextResponse.json(graphData)
+      } else {
+        console.warn(`[Studio API] Endpoint /graph retornou ${response.status} para assistant ${assistantId}`)
+      }
+    } catch (httpError: any) {
+      console.warn('[Studio API] Erro ao buscar grafo via HTTP direto:', {
+        message: httpError.message,
+      })
+    }
+    
+    // Estratégia 3: Usar estrutura padrão como fallback
+    console.warn(`[Studio API] Usando estrutura padrão do grafo para assistant ${assistantId}`)
+    return NextResponse.json(getDefaultGraphStructure(assistantId))
   } catch (error: any) {
-    console.error('[Studio API] Erro ao obter estrutura do grafo:', error)
+    console.error('[Studio API] Erro ao obter estrutura do grafo:', {
+      message: error.message,
+      stack: error.stack,
+      name: error.name,
+    })
     
     // Em caso de erro, retornar estrutura padrão
     try {

@@ -648,7 +648,7 @@ export default function StudioGraphViewer({
       }
       return descriptions[node.type] || `Nó do tipo ${node.type}`
     }
-    return 'Nó do grafo LangGraph'
+    return 'Nó do grafo'
   }
 
   return (

@@ -202,7 +202,7 @@ export default function RunsList() {
               <li>Threads visualizadas serão salvas aqui para acesso rápido</li>
             </ol>
             <p style={{ marginTop: '1.5rem', fontSize: '0.9rem' }}>
-              <strong>Nota:</strong> A API do LangGraph Deployment não permite listar todas as threads.
+              <strong>Nota:</strong> A API não permite listar todas as threads.
               Você precisa ter o Thread ID para visualizar uma execução específica.
             </p>
           </div>

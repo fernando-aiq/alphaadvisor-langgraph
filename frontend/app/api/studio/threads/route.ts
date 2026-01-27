@@ -1,102 +1,75 @@
 import { NextRequest, NextResponse } from 'next/server'
-
-function getLangSmithConfig() {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL?.trim() || ''
-  const apiKey = process.env.NEXT_PUBLIC_LANGSMITH_API_KEY?.trim() || ''
-  
-  if (!apiUrl) {
-    throw new Error('NEXT_PUBLIC_API_URL não configurada')
-  }
-  
-  if (!apiKey) {
-    throw new Error('NEXT_PUBLIC_LANGSMITH_API_KEY não configurada')
-  }
-  
-  return { apiUrl, apiKey }
-}
-
-function createHeaders(apiKey: string): HeadersInit {
-  return {
-    'Content-Type': 'application/json',
-    'x-api-key': apiKey,
-  }
-}
+import { createLangGraphClient } from '@/app/lib/langgraph-client'
 
 /**
  * GET /api/studio/threads
- * Lista todas as threads do LangSmith Deployment
- * NOTA: Este endpoint pode não estar disponível na API do LangGraph Deployment.
- * Se retornar 404 ou 405, significa que o endpoint não existe.
+ * Lista todas as threads do LangGraph Deployment usando SDK
  */
 export async function GET(request: NextRequest) {
   try {
-    const { apiUrl, apiKey } = getLangSmithConfig()
+    const client = createLangGraphClient()
     const searchParams = request.nextUrl.searchParams
+    const limit = parseInt(searchParams.get('limit') || '100')
+    const offset = parseInt(searchParams.get('offset') || '0')
     
-    // Construir query params
-    const queryParams = new URLSearchParams()
-    if (searchParams.get('limit')) queryParams.append('limit', searchParams.get('limit')!)
-    if (searchParams.get('offset')) queryParams.append('offset', searchParams.get('offset')!)
-    
-    const url = `${apiUrl}/threads${queryParams.toString() ? `?${queryParams}` : ''}`
-    
-    const response = await fetch(url, {
-      method: 'GET',
-      headers: createHeaders(apiKey),
-    })
-    
-    // Se endpoint não existir, retornar array vazio
-    if (response.status === 404 || response.status === 405) {
+    try {
+      // Usar SDK para buscar threads - remover metadata: null (SDK não aceita null)
+      const threads = await client.threads.search({
+        limit,
+        offset,
+      })
+      
+      // Normalizar resposta para manter compatibilidade - SDK pode retornar array ou objeto
+      let threadsArray: any[] = []
+      if (Array.isArray(threads)) {
+        threadsArray = threads
+      } else if (threads && typeof threads === 'object') {
+        threadsArray = threads.threads || threads.data || []
+      }
+      
+      return NextResponse.json({ threads: threadsArray })
+    } catch (sdkError: any) {
+      console.error('[Studio API] Erro ao buscar threads via SDK:', {
+        message: sdkError.message,
+        stack: sdkError.stack,
+        status: sdkError.status || sdkError.statusCode,
+      })
+      // Retornar array vazio em caso de erro
       return NextResponse.json({ threads: [] })
     }
-    
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => 'Unknown error')
-      return NextResponse.json(
-        { error: 'Failed to fetch threads', details: errorText },
-        { status: response.status }
-      )
-    }
-    
-    const data = await response.json()
-    
-    // Normalizar resposta para array de threads
-    // A API pode retornar diretamente um array ou um objeto com threads
-    const threads = Array.isArray(data) ? data : (data.threads || [])
-    
-    return NextResponse.json({ threads })
   } catch (error: any) {
     console.error('[Studio API] Erro ao listar threads:', error)
-    // Retornar array vazio em caso de erro (endpoint pode não existir)
     return NextResponse.json({ threads: [] })
   }
 }
 
 /**
  * POST /api/studio/threads
- * Cria uma nova thread
+ * Cria uma nova thread usando SDK
  */
 export async function POST(request: NextRequest) {
   try {
-    const { apiUrl, apiKey } = getLangSmithConfig()
+    const client = createLangGraphClient()
     const body = await request.json()
     
-    const response = await fetch(`${apiUrl}/threads`, {
-      method: 'POST',
-      headers: createHeaders(apiKey),
-      body: JSON.stringify(body),
-    })
-    
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => 'Unknown error')
+    try {
+      // Usar SDK para criar thread
+      const thread = await client.threads.create(body)
+      
+      return NextResponse.json(thread)
+    } catch (sdkError: any) {
+      console.error('[Studio API] Erro ao criar thread via SDK:', sdkError)
+      
+      // Retornar erro apropriado
+      const statusCode = sdkError.status || sdkError.statusCode || 500
       return NextResponse.json(
-        { error: 'Failed to create thread', details: errorText },
-        { status: response.status }
+        { 
+          error: 'Failed to create thread', 
+          details: sdkError.message || 'Unknown error' 
+        },
+        { status: statusCode }
       )
     }
-    
-    const data = await response.json()
-    return NextResponse.json(data)
   } catch (error: any) {
     console.error('[Studio API] Erro ao criar thread:', error)
     return NextResponse.json(

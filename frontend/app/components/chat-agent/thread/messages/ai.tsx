@@ -13,6 +13,7 @@ import { isAgentInboxInterruptSchema } from "@/app/lib/agent-inbox-interrupt";
 import { ThreadView } from "../agent-inbox";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { GenericInterruptView } from "./generic-interrupt";
+import { ExternalLink } from "lucide-react";
 
 function CustomComponent({
   message,
@@ -65,6 +66,31 @@ function parseAnthropicStreamedToolCalls(
   });
 }
 
+function TraceLink({ traceId, runId }: { traceId?: string; runId?: string }) {
+  const projectName = process.env.NEXT_PUBLIC_LANGSMITH_PROJECT_NAME || 'default';
+  
+  if (!traceId && !runId) return null;
+  
+  // Se tiver trace_id, usar ele; senão usar run_id
+  const id = traceId || runId;
+  if (!id) return null;
+  
+  const langSmithUrl = `https://smith.langchain.com/o/${projectName}/traces/${id}`;
+  
+  return (
+    <a
+      href={langSmithUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 underline"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <ExternalLink className="w-3 h-3" />
+      Ver trace no LangSmith
+    </a>
+  );
+}
+
 export function AssistantMessage({
   message,
   isLoading,
@@ -91,6 +117,10 @@ export function AssistantMessage({
   const threadInterrupt = thread.interrupt;
 
   const parentCheckpoint = meta?.firstSeenState?.parent_checkpoint;
+  
+  // Extrair trace_id ou run_id dos metadados se disponível
+  const traceId = meta?.run_id || (meta as any)?.trace_id || (message as any)?.metadata?.trace_id;
+  const runId = meta?.run_id || (message as any)?.metadata?.run_id;
   const anthropicStreamedToolCalls = Array.isArray(content)
     ? parseAnthropicStreamedToolCalls(content)
     : undefined;
@@ -108,7 +138,7 @@ export function AssistantMessage({
   const hasAnthropicToolCalls = !!anthropicStreamedToolCalls?.length;
   const isToolResult = message?.type === "tool";
 
-  if (isToolResult && hideToolCalls) {
+  if (isToolResult && !hideToolCalls) {
     return null;
   }
 
@@ -124,7 +154,7 @@ export function AssistantMessage({
             </div>
           )}
 
-          {!hideToolCalls && (
+          {hideToolCalls && (
             <>
               {(hasToolCalls && toolCallsHaveContents && (
                 <ToolCalls toolCalls={message.tool_calls} />
@@ -137,15 +167,23 @@ export function AssistantMessage({
           )}
 
           {message && <CustomComponent message={message} thread={thread} />}
+          
+          {/* Link para trace no LangSmith */}
+          {(traceId || runId) && (
+            <div className="text-xs text-gray-500 mt-1">
+              <TraceLink traceId={traceId} runId={runId} />
+            </div>
+          )}
+          
           {isAgentInboxInterruptSchema(threadInterrupt?.value) &&
             (isLastMessage || hasNoAIOrToolMessages) && (
               <ThreadView interrupt={threadInterrupt.value} />
             )}
           {threadInterrupt?.value &&
-          !isAgentInboxInterruptSchema(threadInterrupt.value) &&
-          isLastMessage ? (
-            <GenericInterruptView interrupt={threadInterrupt.value} />
-          ) : null}
+            !isAgentInboxInterruptSchema(threadInterrupt.value) &&
+            isLastMessage ? (
+              <GenericInterruptView interrupt={threadInterrupt.value} />
+            ) : null}
           <div
             className={cn(
               "flex gap-2 items-center mr-auto transition-opacity",

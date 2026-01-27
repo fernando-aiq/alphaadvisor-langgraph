@@ -33,10 +33,93 @@ interface Conexao {
   nome: string
   tipo: string
   status: string
-  configuracao?: Record<string, any>
+  configuracao?: {
+    banco?: string
+    agencia?: string
+    conta?: string
+    tipo_conta?: 'corrente' | 'poupanca' | 'investimento'
+    saldo_disponivel?: number
+    ultima_sincronizacao?: string
+    permissoes?: {
+      contas: boolean
+      transacoes: boolean
+      investimentos: boolean
+      cartoes: boolean
+    }
+  }
   created_at: string
   updated_at: string
 }
+
+// Dados mockados para demonstração
+const mockConexoes: Conexao[] = [
+  {
+    id: 'mock-1',
+    nome: 'Banco do Brasil',
+    tipo: 'open_finance',
+    status: 'ativo',
+    configuracao: {
+      banco: 'Banco do Brasil',
+      agencia: '1234-5',
+      conta: '12345-6',
+      tipo_conta: 'corrente',
+      saldo_disponivel: 50000.00,
+      ultima_sincronizacao: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(), // 2 horas atrás
+      permissoes: {
+        contas: true,
+        transacoes: true,
+        investimentos: false,
+        cartoes: true
+      }
+    },
+    created_at: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
+  },
+  {
+    id: 'mock-2',
+    nome: 'Itaú',
+    tipo: 'open_finance',
+    status: 'ativo',
+    configuracao: {
+      banco: 'Itaú Unibanco',
+      agencia: '5678',
+      conta: '78901-2',
+      tipo_conta: 'poupanca',
+      saldo_disponivel: 45000.00,
+      ultima_sincronizacao: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString(), // 5 horas atrás
+      permissoes: {
+        contas: true,
+        transacoes: true,
+        investimentos: true,
+        cartoes: false
+      }
+    },
+    created_at: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString()
+  },
+  {
+    id: 'mock-3',
+    nome: 'Bradesco',
+    tipo: 'open_finance',
+    status: 'ativo',
+    configuracao: {
+      banco: 'Bradesco',
+      agencia: '9012-3',
+      conta: '34567-8',
+      tipo_conta: 'investimento',
+      saldo_disponivel: 55000.00,
+      ultima_sincronizacao: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString(), // 1 hora atrás
+      permissoes: {
+        contas: true,
+        transacoes: true,
+        investimentos: true,
+        cartoes: true
+      }
+    },
+    created_at: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
+    updated_at: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString()
+  }
+]
 
 export default function Conexoes() {
   const [conexoes, setConexoes] = useState<Conexao[]>([])
@@ -68,16 +151,24 @@ export default function Conexoes() {
         timeout: 10000
       })
 
-      setConexoes(response.data?.conexoes || [])
+      const conexoesApi = response.data?.conexoes || []
+      // Se não houver conexões da API, usar dados mockados para demonstração
+      if (conexoesApi.length === 0) {
+        console.log('[Conexões] Nenhuma conexão encontrada na API, usando dados mockados para demonstração')
+        setConexoes(mockConexoes)
+      } else {
+        setConexoes(conexoesApi)
+      }
     } catch (error: any) {
       console.error('[Conexões] Erro ao carregar conexões:', error)
-      // Se for erro 403 ou 404, o endpoint não existe - usar dados vazios
+      // Se for erro 403 ou 404, o endpoint não existe - usar dados mockados
       if (error.response?.status === 403 || error.response?.status === 404) {
-        console.warn('[Conexões] Endpoint não disponível, usando dados vazios')
-        setConexoes([])
+        console.warn('[Conexões] Endpoint não disponível, usando dados mockados para demonstração')
+        setConexoes(mockConexoes)
       } else {
-        setMessage({ type: 'error', text: 'Erro ao carregar conexões. O endpoint pode não estar disponível.' })
-        setTimeout(() => setMessage(null), 5000)
+        // Em caso de outro erro, também usar mockados para não deixar vazio
+        console.warn('[Conexões] Erro ao carregar, usando dados mockados para demonstração')
+        setConexoes(mockConexoes)
       }
     } finally {
       setLoading(false)
@@ -250,6 +341,27 @@ export default function Conexoes() {
                 Conecte suas contas bancárias para que o AlphaAdvisor tenha acesso às suas informações financeiras e possa oferecer 
                 recomendações mais personalizadas e precisas.
               </p>
+              <div style={{ 
+                marginTop: '1rem', 
+                padding: '0.75rem', 
+                backgroundColor: '#fff3cd', 
+                border: '1px solid #ffc107',
+                borderRadius: '6px'
+              }}>
+                <p style={{ 
+                  color: '#856404', 
+                  margin: 0, 
+                  fontSize: '0.875rem', 
+                  fontWeight: '500',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem'
+                }}>
+                  <FiInfo size={16} />
+                  <strong>Nota:</strong> Os dados exibidos nesta página são mockados (simulados) para fins de demonstração. 
+                  Em produção, os dados viriam de conexões reais via Open Finance.
+                </p>
+              </div>
             </div>
           </div>
         </div>
@@ -305,7 +417,19 @@ export default function Conexoes() {
       )}
 
       <section className="config-section">
-        <h3>Conexões Open Finance ({conexoes.length})</h3>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+          <h3>Conexões Open Finance ({conexoes.length})</h3>
+          <span style={{ 
+            fontSize: '0.75rem', 
+            color: '#856404', 
+            backgroundColor: '#fff3cd', 
+            padding: '0.25rem 0.75rem', 
+            borderRadius: '12px',
+            fontWeight: '500'
+          }}>
+            Dados Mockados
+          </span>
+        </div>
         {conexoes.length === 0 ? (
           <div className="card" style={{ textAlign: 'center', padding: '3rem' }}>
             <FiLink size={48} color="var(--text-muted)" style={{ marginBottom: '1rem' }} />
@@ -399,7 +523,7 @@ export default function Conexoes() {
                   </div>
 
                   {/* Detalhes da conta Open Finance */}
-                  {isOpenFinance && contaInfo.banco && (
+                  {isOpenFinance && (
                     <div style={{
                       marginTop: '1rem',
                       paddingTop: '1rem',
@@ -412,67 +536,139 @@ export default function Conexoes() {
                         <FiDollarSign />
                         Conta Conectada
                       </h5>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem' }}>
-                        <div>
-                          <p style={{ margin: '0 0 0.25rem 0', fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '600' }}>
-                            Banco
-                          </p>
-                          <p style={{ margin: 0, fontSize: '1rem', color: 'var(--text-primary)', fontWeight: '500' }}>
-                            {contaInfo.banco}
-                          </p>
-                        </div>
-                        <div>
-                          <p style={{ margin: '0 0 0.25rem 0', fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '600' }}>
-                            Agência
-                          </p>
-                          <p style={{ margin: 0, fontSize: '1rem', color: 'var(--text-primary)', fontWeight: '500' }}>
-                            {contaInfo.agencia}
-                          </p>
-                        </div>
-                        <div>
-                          <p style={{ margin: '0 0 0.25rem 0', fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '600' }}>
-                            Conta
-                          </p>
-                          <p style={{ margin: 0, fontSize: '1rem', color: 'var(--text-primary)', fontWeight: '500' }}>
-                            {contaInfo.conta}
-                          </p>
-                        </div>
-                        <div>
-                          <p style={{ margin: '0 0 0.25rem 0', fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '600' }}>
-                            Tipo
-                          </p>
-                          <p style={{ margin: 0, fontSize: '1rem', color: 'var(--text-primary)', fontWeight: '500' }}>
-                            {contaInfo.tipo_conta}
-                          </p>
-                        </div>
-                        {contaInfo.saldo_disponivel !== undefined && (
-                          <div>
-                            <p style={{ margin: '0 0 0.25rem 0', fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '600' }}>
-                              Saldo Disponível
-                            </p>
-                            <p style={{ margin: 0, fontSize: '1rem', color: '#10b981', fontWeight: '600' }}>
-                              R$ {contaInfo.saldo_disponivel.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                            </p>
+                      {contaInfo.banco ? (
+                        <>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '1rem', marginBottom: '1rem' }}>
+                            <div>
+                              <p style={{ margin: '0 0 0.25rem 0', fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '600' }}>
+                                Banco
+                              </p>
+                              <p style={{ margin: 0, fontSize: '1rem', color: 'var(--text-primary)', fontWeight: '500' }}>
+                                {contaInfo.banco}
+                              </p>
+                            </div>
+                            <div>
+                              <p style={{ margin: '0 0 0.25rem 0', fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '600' }}>
+                                Agência
+                              </p>
+                              <p style={{ margin: 0, fontSize: '1rem', color: 'var(--text-primary)', fontWeight: '500' }}>
+                                {contaInfo.agencia}
+                              </p>
+                            </div>
+                            <div>
+                              <p style={{ margin: '0 0 0.25rem 0', fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '600' }}>
+                                Conta
+                              </p>
+                              <p style={{ margin: 0, fontSize: '1rem', color: 'var(--text-primary)', fontWeight: '500' }}>
+                                {contaInfo.conta}
+                              </p>
+                            </div>
+                            <div>
+                              <p style={{ margin: '0 0 0.25rem 0', fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '600' }}>
+                                Tipo de Conta
+                              </p>
+                              <p style={{ margin: 0, fontSize: '1rem', color: 'var(--text-primary)', fontWeight: '500' }}>
+                                {contaInfo.tipo_conta === 'corrente' ? 'Conta Corrente' : 
+                                 contaInfo.tipo_conta === 'poupanca' ? 'Conta Poupança' : 
+                                 contaInfo.tipo_conta === 'investimento' ? 'Conta Investimento' : 
+                                 contaInfo.tipo_conta || 'N/A'}
+                              </p>
+                            </div>
+                            {contaInfo.saldo_disponivel !== undefined && (
+                              <div>
+                                <p style={{ margin: '0 0 0.25rem 0', fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '600' }}>
+                                  Saldo Disponível
+                                </p>
+                                <p style={{ margin: 0, fontSize: '1.25rem', color: '#10b981', fontWeight: '600' }}>
+                                  R$ {contaInfo.saldo_disponivel.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </p>
+                              </div>
+                            )}
+                            {contaInfo.ultima_sincronizacao && (
+                              <div>
+                                <p style={{ margin: '0 0 0.25rem 0', fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                  <FiRefreshCw size={14} />
+                                  Última Sincronização
+                                </p>
+                                <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
+                                  {new Date(contaInfo.ultima_sincronizacao).toLocaleString('pt-BR', {
+                                    day: '2-digit',
+                                    month: '2-digit',
+                                    year: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  })}
+                                </p>
+                              </div>
+                            )}
                           </div>
-                        )}
-                        {contaInfo.ultima_sincronizacao && (
-                          <div>
-                            <p style={{ margin: '0 0 0.25rem 0', fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                              <FiRefreshCw size={14} />
-                              Última Sincronização
-                            </p>
-                            <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-secondary)' }}>
-                              {new Date(contaInfo.ultima_sincronizacao).toLocaleString('pt-BR', {
-                                day: '2-digit',
-                                month: '2-digit',
-                                year: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit'
-                              })}
-                            </p>
-                          </div>
-                        )}
-                      </div>
+                          {contaInfo.permissoes && (
+                            <div style={{
+                              marginTop: '1rem',
+                              paddingTop: '1rem',
+                              borderTop: '1px solid #e0e0e0'
+                            }}>
+                              <p style={{ margin: '0 0 0.75rem 0', fontSize: '0.9rem', color: 'var(--text-muted)', fontWeight: '600' }}>
+                                Permissões Concedidas
+                              </p>
+                              <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                                {contaInfo.permissoes.contas && (
+                                  <span style={{
+                                    backgroundColor: '#e8f5e9',
+                                    color: '#2e7d32',
+                                    padding: '0.25rem 0.75rem',
+                                    borderRadius: '12px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: '500'
+                                  }}>
+                                    Contas
+                                  </span>
+                                )}
+                                {contaInfo.permissoes.transacoes && (
+                                  <span style={{
+                                    backgroundColor: '#e8f5e9',
+                                    color: '#2e7d32',
+                                    padding: '0.25rem 0.75rem',
+                                    borderRadius: '12px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: '500'
+                                  }}>
+                                    Transações
+                                  </span>
+                                )}
+                                {contaInfo.permissoes.investimentos && (
+                                  <span style={{
+                                    backgroundColor: '#e8f5e9',
+                                    color: '#2e7d32',
+                                    padding: '0.25rem 0.75rem',
+                                    borderRadius: '12px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: '500'
+                                  }}>
+                                    Investimentos
+                                  </span>
+                                )}
+                                {contaInfo.permissoes.cartoes && (
+                                  <span style={{
+                                    backgroundColor: '#e8f5e9',
+                                    color: '#2e7d32',
+                                    padding: '0.25rem 0.75rem',
+                                    borderRadius: '12px',
+                                    fontSize: '0.75rem',
+                                    fontWeight: '500'
+                                  }}>
+                                    Cartões
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', fontStyle: 'italic' }}>
+                          Aguardando conexão via Open Finance...
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
