@@ -17,6 +17,8 @@ import {
   ArrowDown,
   LoaderCircle,
   SquarePen,
+  History,
+  Shield,
 } from "lucide-react";
 import { useQueryState, parseAsBoolean } from "nuqs";
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom";
@@ -24,6 +26,7 @@ import { toast } from "sonner";
 import { useMediaQuery } from "@/app/hooks/useMediaQuery";
 import { Label } from "@/app/components/chat-agent/ui/label";
 import { Switch } from "@/app/components/chat-agent/ui/switch";
+import ThreadHistory from "./history";
 
 function StickyToBottomContent(props: {
   content: ReactNode;
@@ -68,6 +71,10 @@ export function Thread() {
   const [hideToolCalls, setHideToolCalls] = useQueryState(
     "hideToolCalls",
     parseAsBoolean.withDefault(false),
+  );
+  const [chatHistoryOpen, setChatHistoryOpen] = useQueryState(
+    "chatHistoryOpen",
+    parseAsBoolean.withDefault(true),
   );
   const [input, setInput] = useState("");
   const [firstTokenReceived, setFirstTokenReceived] = useState(false);
@@ -170,6 +177,9 @@ export function Thread() {
 
   return (
     <div className="flex w-full h-screen overflow-hidden">
+      {/* Thread History Sidebar */}
+      {chatHistoryOpen && <ThreadHistory />}
+      
       <motion.div
         className={cn(
           "flex-1 flex flex-col min-w-0 overflow-hidden relative",
@@ -177,26 +187,33 @@ export function Thread() {
         )}
         layout={isLargeScreen}
       >
-        {chatStarted && (
-          <div className="flex items-center justify-between gap-3 p-2 z-10 relative">
-            <div className="flex items-center justify-start gap-2 relative">
-            </div>
-
-            <div className="flex items-center gap-4">
-              <TooltipIconButton
-                size="lg"
-                className="p-4"
-                tooltip="New thread"
-                variant="ghost"
-                onClick={() => setThreadId(null)}
-              >
-                <SquarePen className="size-5" />
-              </TooltipIconButton>
-            </div>
-
-            <div className="absolute inset-x-0 top-full h-5 bg-gradient-to-b from-background to-background/0" />
+        <div className="flex items-center justify-between gap-3 p-2 z-10 relative">
+          <div className="flex items-center justify-start gap-2 relative">
+            <TooltipIconButton
+              size="lg"
+              className="p-4"
+              tooltip={chatHistoryOpen ? "Ocultar histórico" : "Mostrar histórico"}
+              variant="ghost"
+              onClick={() => setChatHistoryOpen((p) => !p)}
+            >
+              <History className="size-5" />
+            </TooltipIconButton>
           </div>
-        )}
+
+          <div className="flex items-center gap-4">
+            <TooltipIconButton
+              size="lg"
+              className="p-4"
+              tooltip="New thread"
+              variant="ghost"
+              onClick={() => setThreadId(null)}
+            >
+              <SquarePen className="size-5" />
+            </TooltipIconButton>
+          </div>
+
+          <div className="absolute inset-x-0 top-full h-5 bg-gradient-to-b from-background to-background/0" />
+        </div>
 
         <StickToBottom className="relative flex-1 overflow-hidden">
           <StickyToBottomContent
@@ -278,12 +295,21 @@ export function Thread() {
                             checked={hideToolCalls ?? false}
                             onCheckedChange={setHideToolCalls}
                           />
-                          <Label
-                            htmlFor="render-tool-calls"
-                            className="text-sm font-medium text-gray-900"
-                          >
-                            Ocultar Tools
-                          </Label>
+                          <div className="flex items-center gap-2">
+                            <Label
+                              htmlFor="render-tool-calls"
+                              className="text-sm font-medium text-gray-900"
+                            >
+                              Mostrar Tools
+                            </Label>
+                            <div
+                              className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 border border-amber-200"
+                              title="Opção avançada para administradores. Mostra detalhes técnicos de tool calls."
+                            >
+                              <Shield className="w-3 h-3 text-amber-600" />
+                              <span className="text-xs font-medium text-amber-700">Admin</span>
+                            </div>
+                          </div>
                         </div>
                       </div>
                       {stream.isLoading ? (
