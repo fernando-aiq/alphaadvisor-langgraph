@@ -16,16 +16,20 @@ const DEFAULT_ASSISTANT_ID = process.env.NEXT_PUBLIC_ASSISTANT_ID?.trim();
 export function StreamProvider({ children }: { children: ReactNode }) {
   const [apiUrl] = useQueryState("apiUrl");
   const [assistantId] = useQueryState("assistantId");
+  const [threadId, setThreadId] = useQueryState("threadId");
 
   // Usa query params se disponível, senão usa variáveis de ambiente
   // Remove espaços e quebras de linha para evitar erros
   const finalApiUrl = (apiUrl || DEFAULT_API_URL)?.trim();
   const finalAssistantId = (assistantId || DEFAULT_ASSISTANT_ID)?.trim();
+  const finalThreadId = threadId?.trim();
 
   const stream = useStream({
     assistantId: finalAssistantId || undefined,
     apiUrl: finalApiUrl || undefined,
     apiKey: getApiKey() ?? undefined,
+    threadId: finalThreadId || undefined,
+    onThreadId: (id: string) => setThreadId(id),
   });
 
   return (
