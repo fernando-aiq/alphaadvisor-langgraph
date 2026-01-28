@@ -702,6 +702,7 @@ def handoff_node(state: MessagesState, config: Optional[RunnableConfig] = None) 
     cfg = (config or {}).get("configurable", {}) or {}
     user_id = cfg.get("user_id", "default")
     regras = fetch_regras_redirecionamento(user_id)
+    print(f"[RegrasHandoff] handoff_node user_id={user_id} regras_count={len(regras)}")
     deve, regra_casada = _deve_redirecionar(state["messages"], regras)
     reason = regra_casada or "Solicitação de recomendação de investimentos"
     handoff_message = AIMessage(
@@ -730,6 +731,7 @@ def should_continue(state: MessagesState, config: Optional[RunnableConfig] = Non
     cfg = (config or {}).get("configurable", {}) or {}
     user_id = cfg.get("user_id", "default")
     regras = fetch_regras_redirecionamento(user_id)
+    print(f"[RegrasHandoff] should_continue user_id={user_id} regras_count={len(regras)}")
     if detect_recommendation_request(state):
         return "handoff"
     deve, _ = _deve_redirecionar(state["messages"], regras)
