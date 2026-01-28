@@ -80,8 +80,11 @@ async def create_thread(request: Request):
             if msg.get("role") == "user":
                 langchain_messages.append(HumanMessage(content=msg.get("content", "")))
         
-        # Executar grafo
-        result = graph.invoke({"messages": langchain_messages})
+        # Executar grafo (injetar backend_url para regras de handoff virem do backend/S3)
+        config = {}
+        if os.getenv("BACKEND_URL"):
+            config["configurable"] = {"backend_url": os.getenv("BACKEND_URL").strip().rstrip("/")}
+        result = graph.invoke({"messages": langchain_messages}, config=config if config else None)
         
         # Converter resultado para formato de resposta
         response_messages = []
