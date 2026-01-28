@@ -34,7 +34,7 @@ from agent.backend_tools import (
     calcular_projecao,
     buscar_oportunidades
 )
-from agent.config_tools import obter_regras_redirecionamento, fetch_regras_redirecionamento
+from agent.config_tools import obter_regras_redirecionamento, REGRAS_REDIRECIONAMENTO_PADRAO
 
 # Usar modelo configurável via .env ou padrão gpt-4o
 import os
@@ -697,12 +697,20 @@ def should_route_to_calculation(state: MessagesState) -> str:
 def handoff_node(state: MessagesState, config: Optional[RunnableConfig] = None) -> dict:
     """
     Nó de handoff: informa que um assessor humano será acionado.
-    Usa regras do backend (via fetch_regras_redirecionamento) para definir handoff_reason.
+    Obtém regras invocando a tool obter_regras_redirecionamento (mesma fonte que o agente).
     """
     cfg = (config or {}).get("configurable", {}) or {}
     user_id = cfg.get("user_id", "default")
     backend_url = cfg.get("backend_url") or os.getenv("BACKEND_URL")
-    regras = fetch_regras_redirecionamento(user_id, backend_url=backend_url)
+    payload = {"user_id": user_id}
+    if backend_url:
+        payload["backend_url"] = backend_url
+    try:
+        result = obter_regras_redirecionamento.invoke(payload)
+        regras = result.get("regras_redirecionamento") or []
+    except Exception as e:
+        print(f"[RegrasHandoff] handoff_node invoke falhou: {e}")
+        regras = list(REGRAS_REDIRECIONAMENTO_PADRAO)
     print(f"[RegrasHandoff] handoff_node user_id={user_id} backend_url={bool(backend_url)} regras_count={len(regras)}")
     deve, regra_casada = _deve_redirecionar(state["messages"], regras)
     reason = regra_casada or "Solicitação de recomendação de investimentos"
@@ -724,7 +732,7 @@ def should_continue(state: MessagesState, config: Optional[RunnableConfig] = Non
     """
     Determina o próximo nó após o agent.
     Ordem: (1) tool_calls -> tools; (2) recomendação de investimentos ou regras de handoff -> handoff; (3) end.
-    Regras de handoff vêm do backend via fetch_regras_redirecionamento(user_id).
+    Regras de handoff obtidas invocando a tool obter_regras_redirecionamento (mesma fonte que o agente).
     """
     last = state["messages"][-1]
     if getattr(last, "tool_calls", None):
@@ -732,7 +740,15 @@ def should_continue(state: MessagesState, config: Optional[RunnableConfig] = Non
     cfg = (config or {}).get("configurable", {}) or {}
     user_id = cfg.get("user_id", "default")
     backend_url = cfg.get("backend_url") or os.getenv("BACKEND_URL")
-    regras = fetch_regras_redirecionamento(user_id, backend_url=backend_url)
+    payload = {"user_id": user_id}
+    if backend_url:
+        payload["backend_url"] = backend_url
+    try:
+        result = obter_regras_redirecionamento.invoke(payload)
+        regras = result.get("regras_redirecionamento") or []
+    except Exception as e:
+        print(f"[RegrasHandoff] should_continue invoke falhou: {e}")
+        regras = list(REGRAS_REDIRECIONAMENTO_PADRAO)
     print(f"[RegrasHandoff] should_continue user_id={user_id} backend_url={bool(backend_url)} regras_count={len(regras)}")
     if detect_recommendation_request(state):
         return "handoff"
