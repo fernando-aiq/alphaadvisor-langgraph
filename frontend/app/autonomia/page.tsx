@@ -6,28 +6,6 @@ import Toggle from '../components/Toggle'
 import { getUserIdFromToken } from '../utils/jwt'
 import '../globals.css'
 
-// Função para obter URL da API (reutilizando lógica do GraphLoader)
-const getApiUrl = () => {
-  if (typeof window === 'undefined') {
-    const url = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-    return url.trim().replace(/\r\n/g, '').replace(/\n/g, '')
-  }
-  
-  if (process.env.NEXT_PUBLIC_API_URL) {
-    const url = process.env.NEXT_PUBLIC_API_URL
-    return url.trim().replace(/\r\n/g, '').replace(/\n/g, '')
-  }
-  
-  const isVercel = window.location.hostname.includes('vercel.app') || 
-                   window.location.hostname.includes('vercel.com')
-  
-  if (isVercel) {
-    return 'http://localhost:8000'
-  }
-  
-  return 'http://localhost:8000'
-}
-
 // Configurações padrão de autonomia
 const AUTONOMIA_PADRAO = {
   nivel: 'assistido',
@@ -67,11 +45,11 @@ export default function Autonomia() {
   const loadConfig = async () => {
     setLoading(true)
     try {
-      const apiUrl = getApiUrl()
       const userId = getUserIdFromToken()
       const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
-      
-      const response = await axios.get(`${apiUrl}/api/configuracoes`, {
+      // Sempre mesma origem (proxy para Flask) — evita 403 do LangGraph
+      const baseURL = typeof window !== 'undefined' ? window.location.origin : ''
+      const response = await axios.get(`${baseURL}/api/configuracoes`, {
         params: { user_id: userId || 'default' },
         headers: token ? { Authorization: `Bearer ${token}` } : {},
         timeout: 10000
@@ -92,12 +70,11 @@ export default function Autonomia() {
     setSaving(true)
     setMessage(null)
     try {
-      const apiUrl = getApiUrl()
       const userId = getUserIdFromToken()
       const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null
-      
+      const baseURL = typeof window !== 'undefined' ? window.location.origin : ''
       await axios.post(
-        `${apiUrl}/api/configuracoes`,
+        `${baseURL}/api/configuracoes`,
         { autonomia: config },
         {
           params: { user_id: userId || 'default' },
