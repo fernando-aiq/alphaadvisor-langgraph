@@ -146,6 +146,20 @@ def salvar_configuracoes():
         'configuracoes': configuracoes_usuario[user_id]
     }), 200
 
+@configuracoes_bp.route('/api/configuracoes/regras_redirecionamento', methods=['GET'])
+def obter_regras_redirecionamento():
+    """Retorna as regras de redirecionamento (handoff) do usuário. Usado pelo LangSmith/Studio."""
+    token = request.headers.get('Authorization', '').replace('Bearer ', '')
+    user_id_from_token = get_user_id_from_token(token) if token else None
+    user_id = user_id_from_token or request.args.get('user_id', 'default')
+    config = configuracoes_usuario.get(user_id)
+    if config is None:
+        regras = CONFIGURACOES_PADRAO.get('autonomia', {}).get('regras_redirecionamento', [])
+    else:
+        regras = config.get('autonomia', {}).get('regras_redirecionamento') or CONFIGURACOES_PADRAO.get('autonomia', {}).get('regras_redirecionamento', [])
+    return jsonify({"regras_redirecionamento": regras}), 200
+
+
 @configuracoes_bp.route('/api/configuracoes/reset', methods=['POST'])
 def resetar_configuracoes():
     """Reseta configurações para padrão"""

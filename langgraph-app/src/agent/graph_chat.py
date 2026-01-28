@@ -10,7 +10,7 @@ from pathlib import Path
 import re
 import os
 import json
-from typing import Optional, Tuple
+from typing import Any, Optional, Tuple
 from threading import Thread
 from datetime import datetime
 
@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 from langchain_core.messages import SystemMessage, AIMessage, HumanMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_openai import ChatOpenAI
 from langgraph.graph import MessagesState, StateGraph, START, END
 from langgraph.prebuilt import ToolNode
@@ -33,13 +34,14 @@ from agent.backend_tools import (
     calcular_projecao,
     buscar_oportunidades
 )
+from agent.config_tools import obter_regras_redirecionamento, fetch_regras_redirecionamento
 
 # Usar modelo configurável via .env ou padrão gpt-4o
 import os
 model_name = os.getenv('AI_MODEL', 'gpt-4o')
 model = ChatOpenAI(model=model_name, temperature=0.7)
 
-# Todas as tools do backend
+# Todas as tools do backend + tool de regras de handoff
 tools = [
     obter_perfil,
     obter_carteira,
@@ -48,7 +50,8 @@ tools = [
     analisar_diversificacao,
     recomendar_rebalanceamento,
     calcular_projecao,
-    buscar_oportunidades
+    buscar_oportunidades,
+    obter_regras_redirecionamento,
 ]
 
 tool_node = ToolNode(tools)
@@ -66,13 +69,15 @@ SYSTEM = (
     "- recomendar_rebalanceamento: Gera recomendações de rebalanceamento. Use quando perguntarem sobre rebalanceamento ou ajustes.\n"
     "- calcular_projecao: Calcula projeção de investimento. Use quando perguntarem sobre projeções ou viabilidade de objetivos.\n"
     "- buscar_oportunidades: Busca oportunidades de investimento. Use quando perguntarem sobre oportunidades ou recomendações de produtos.\n"
+    "- obter_regras_redirecionamento: Busca as regras de handoff (quando transferir para assessor humano). Use quando perguntarem 'quais tools tem', 'tem ferramentas pra handoff' ou 'quando vocês transferem para humano'.\n"
     "\n"
     "IMPORTANTE: Sempre use as ferramentas quando necessário. Se o cliente perguntar sobre perfil, carteira, adequação, etc., "
     "use as ferramentas apropriadas para obter dados reais antes de responder. "
     "Seja conversacional, empático e claro nas explicações.\n"
     "\n"
     "ATENÇÃO: Quando o cliente solicitar recomendações específicas de investimentos, produtos financeiros ou orientação personalizada "
-    "para investir, você deve sinalizar que um assessor humano será acionado para fornecer essas recomendações."
+    "para investir, ou quando a mensagem se enquadrar nas regras de handoff (cancelamento de conta, reclamações, valores altos, questões legais), "
+    "você deve sinalizar que um assessor humano será acionado."
 )
 
 
@@ -121,6 +126,65 @@ def _extract_text_content(content) -> str:
         return " ".join(text_parts).lower()
     else:
         return ""
+
+
+def _extract_text_plain(content: Any) -> str:
+    """Texto bruto para o classificador de handoff (sem lower)."""
+    if isinstance(content, str):
+        return (content or "").strip()
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict) and "text" in item:
+                parts.append(item["text"])
+        return " ".join(parts).strip()
+    return str(content or "").strip()
+
+
+def _deve_redirecionar(messages: list, regras: list) -> Tuple[bool, Optional[str]]:
+    """
+    Usa o LLM para decidir se a última mensagem do usuário se enquadra em alguma
+    regra de redirecionamento. Retorna (True, regra_casada) ou (False, None).
+    """
+    if not regras:
+        return False, None
+    regras = [r.strip() for r in regras if r and str(r).strip()]
+    if not regras:
+        return False, None
+    user_msgs = [m for m in messages if isinstance(m, HumanMessage)]
+    if not user_msgs:
+        return False, None
+    last_user = user_msgs[-1]
+    texto_usuario = _extract_text_plain(getattr(last_user, "content", None) or "")
+    if not texto_usuario:
+        return False, None
+    prompt = (
+        "Você é um classificador. Avalie se a mensagem do cliente se enquadra em ALGUMA das regras abaixo.\n\n"
+        "Mensagem do cliente:\n\"\"\"\n" + texto_usuario + "\n\"\"\"\n\n"
+        "Regras (redirecionar para humano quando se aplicar):\n"
+        + "\n".join(f"- {r}" for r in regras)
+        + "\n\n"
+        "Responda com UMA ÚNICA LINHA:\n"
+        "- Se a mensagem se enquadrar em alguma regra, repita EXATAMENTE o texto dessa regra (uma das listadas).\n"
+        "- Se não se enquadrar em nenhuma, responda apenas: NENHUMA\n"
+        "Não invente regras. Não explique. Só a regra exata ou NENHUMA."
+    )
+    try:
+        resp = model.invoke([HumanMessage(content=prompt)])
+        out = (getattr(resp, "content", None) or str(resp)).strip()
+        if not out or out.upper() == "NENHUMA":
+            return False, None
+        for r in regras:
+            if not r or not r.strip():
+                continue
+            rnorm = r.strip()
+            if rnorm in out or out in rnorm:
+                return True, rnorm
+        return True, out[:200]
+    except Exception:
+        return False, None
 
 
 def detect_simple_calculation(content: str) -> Optional[Tuple[float, str, float]]:
@@ -630,49 +694,47 @@ def should_route_to_calculation(state: MessagesState) -> str:
     return "agent"
 
 
-def handoff_node(state: MessagesState) -> dict:
+def handoff_node(state: MessagesState, config: Optional[RunnableConfig] = None) -> dict:
     """
-    Nó de handoff para recomendações de investimentos.
-    Prepara mensagem informando que um assessor humano será acionado.
+    Nó de handoff: informa que um assessor humano será acionado.
+    Usa regras do backend (via fetch_regras_redirecionamento) para definir handoff_reason.
     """
+    cfg = (config or {}).get("configurable", {}) or {}
+    user_id = cfg.get("user_id", "default")
+    regras = fetch_regras_redirecionamento(user_id)
+    deve, regra_casada = _deve_redirecionar(state["messages"], regras)
+    reason = regra_casada or "Solicitação de recomendação de investimentos"
     handoff_message = AIMessage(
         content=(
-            "Entendo que você está buscando recomendações específicas de investimentos. "
-            "Para fornecer orientações personalizadas e adequadas ao seu perfil, "
-            "vou transferir sua solicitação para um de nossos assessores especializados. "
-            "\n\n"
-            "Nossos assessores têm acesso a análises detalhadas do mercado e podem "
-            "oferecer recomendações personalizadas baseadas em seu perfil de investidor, "
-            "objetivos financeiros e situação atual da sua carteira. "
-            "\n\n"
-            "Você receberá um contato em breve para uma conversa personalizada sobre "
-            "as melhores oportunidades de investimento para você."
+            "Para melhor atendê-lo neste assunto, vou encaminhar sua solicitação para um de nossos assessores. "
+            "Você receberá um contato em breve."
         ),
         additional_kwargs={
             "handoff": True,
-            "handoff_reason": "Solicitação de recomendação de investimentos",
-            "handoff_type": "investment_recommendation"
+            "handoff_reason": reason,
+            "handoff_rule": reason,
         }
     )
-    
     return {"messages": [handoff_message]}
 
 
-def should_continue(state: MessagesState) -> str:
+def should_continue(state: MessagesState, config: Optional[RunnableConfig] = None) -> str:
     """
     Determina o próximo nó após o agent.
-    Verifica primeiro se há tool_calls, depois se precisa fazer handoff, senão vai para end.
+    Ordem: (1) tool_calls -> tools; (2) recomendação de investimentos ou regras de handoff -> handoff; (3) end.
+    Regras de handoff vêm do backend via fetch_regras_redirecionamento(user_id).
     """
-    # Verificar se há tool_calls primeiro (prioridade sobre handoff)
     last = state["messages"][-1]
     if getattr(last, "tool_calls", None):
         return "tools"
-    
-    # Verificar se é uma solicitação de recomendação de investimentos
-    # Verifica a mensagem original do usuário antes da resposta do agente
+    cfg = (config or {}).get("configurable", {}) or {}
+    user_id = cfg.get("user_id", "default")
+    regras = fetch_regras_redirecionamento(user_id)
     if detect_recommendation_request(state):
         return "handoff"
-    
+    deve, _ = _deve_redirecionar(state["messages"], regras)
+    if deve:
+        return "handoff"
     return "end"
 
 
