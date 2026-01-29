@@ -45,9 +45,12 @@ def _inject_regras_redirecionamento(config: dict) -> None:
         autonomia = cfg.get("autonomia", {}) or CONFIGURACOES_PADRAO.get("autonomia", {})
         regras = autonomia.get("regras_redirecionamento", _DEFAULT_REGRAS_REDIRECIONAMENTO)
         config["configurable"]["regras_redirecionamento"] = regras
+        respostas = autonomia.get("respostas") or CONFIGURACOES_PADRAO.get("autonomia", {}).get("respostas", {})
+        config["configurable"]["respostas_permitidas"] = respostas
     except Exception as e:
         logger.warning("[LangGraphServer] Falha ao carregar regras de redirecionamento: %s", e)
         config["configurable"]["regras_redirecionamento"] = _DEFAULT_REGRAS_REDIRECIONAMENTO
+        config["configurable"]["respostas_permitidas"] = CONFIGURACOES_PADRAO.get("autonomia", {}).get("respostas", {})
 
 
 # Funções helper para logging estruturado

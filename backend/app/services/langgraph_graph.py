@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 import logging
-from typing import Any
+from typing import Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +20,15 @@ REGRAS_REDIRECIONAMENTO_PADRAO = [
     "Solicitação de cancelamento de conta",
     "Questões legais ou regulatórias",
 ]
+
+# Respostas permitidas padrão (tudo True = não handoff por tópico quando não injetado)
+RESPOSTAS_PADRAO = {
+    "falar_sobre_precos": True,
+    "falar_sobre_risco": True,
+    "recomendar_produtos": True,
+    "fornecer_projecoes": True,
+    "comparar_produtos": True,
+}
 
 try:
     from langchain_core.messages import SystemMessage, AIMessage, HumanMessage
@@ -198,12 +207,87 @@ def _deve_redirecionar(messages: list, regras: list[str], llm_model=None):
         return False, None
 
 
+def _detect_recommendation_request(state: MessagesState) -> bool:
+    """Detecta se a mensagem do usuário é solicitação de recomendação de investimentos."""
+    messages = state.get("messages", [])
+    user_msgs = [m for m in messages if isinstance(m, HumanMessage)]
+    if not user_msgs:
+        return False
+    last = user_msgs[-1]
+    content = _extract_text_content(getattr(last, "content", None) or "")
+    content = content.lower() if isinstance(content, str) else ""
+    keywords = [
+        "recomende", "recomendação", "recomendações", "onde investir", "em que investir",
+        "qual investimento", "melhor investimento", "recomendar produtos", "me indique investimentos",
+    ]
+    return any(k in content for k in keywords)
+
+
+def _deve_handoff_por_respostas(state: MessagesState, respostas: dict) -> Tuple[bool, Optional[str]]:
+    """
+    Verifica se a mensagem pede algo sobre um tópico cuja resposta não está permitida.
+    Retorna (True, nome_do_topico) ou (False, None).
+    """
+    if not respostas:
+        return False, None
+    topicos_nao_permitidos = [k for k, v in respostas.items() if v is False]
+    if not topicos_nao_permitidos:
+        return False, None
+    user_msgs = [m for m in state.get("messages", []) if isinstance(m, HumanMessage)]
+    if not user_msgs:
+        return False, None
+    last_user = user_msgs[-1]
+    texto_usuario = _extract_text_content(getattr(last_user, "content", None) or "")
+    if not texto_usuario:
+        return False, None
+    topic_labels = {
+        "falar_sobre_precos": "preços e cotações",
+        "falar_sobre_risco": "riscos de investimentos",
+        "recomendar_produtos": "recomendação de produtos",
+        "fornecer_projecoes": "projeções financeiras",
+        "comparar_produtos": "comparação de produtos",
+    }
+    labels_str = ", ".join(topic_labels.get(t, t) for t in topicos_nao_permitidos)
+    prompt = (
+        "Você é um classificador. A mensagem do cliente pede informação ou ação sobre algum destes tópicos?\n"
+        f"Tópicos (não permitidos para o agente responder): {labels_str}\n\n"
+        f"Mensagem do cliente:\n\"\"\"\n{texto_usuario}\n\"\"\"\n\n"
+        "Responda com UMA ÚNICA LINHA:\n"
+        "- Se a mensagem pedir algo sobre um desses tópicos, responda apenas a CHAVE: falar_sobre_precos, falar_sobre_risco, recomendar_produtos, fornecer_projecoes ou comparar_produtos.\n"
+        "- Se não pedir sobre nenhum deles, responda apenas: NENHUM\n"
+    )
+    try:
+        resp = model.invoke([HumanMessage(content=prompt)])
+        out = (getattr(resp, "content", None) or str(resp)).strip().lower()
+        if not out or out == "nenhum":
+            return False, None
+        for t in topicos_nao_permitidos:
+            if t.lower() in out or out in t.lower():
+                return True, t
+        return True, topicos_nao_permitidos[0]
+    except Exception as e:
+        logger.warning("[LangGraphGraph] _deve_handoff_por_respostas LLM falhou: %s", e)
+        return False, None
+
+
 def should_route_after_init(state: MessagesState, config: RunnableConfig) -> str:
     """
-    Router pós-init: decide handoff ou agent com base só na mensagem do usuário.
-    A decisão de handoff é feita antes de o agente responder.
+    Router pós-init: decide handoff ou agent com base na mensagem do usuário.
+    Handoff se: casa regra de redirecionamento OU pede tópico cuja resposta não está permitida.
     """
-    regras = (config.get("configurable") or {}).get("regras_redirecionamento") or REGRAS_REDIRECIONAMENTO_PADRAO
+    cfg = config.get("configurable") or {}
+    regras = cfg.get("regras_redirecionamento") or REGRAS_REDIRECIONAMENTO_PADRAO
+    respostas = cfg.get("respostas_permitidas") or RESPOSTAS_PADRAO
+    if not isinstance(respostas, dict):
+        respostas = dict(RESPOSTAS_PADRAO)
+    # Resposta não permitida: recomendar produtos
+    if _detect_recommendation_request(state) and not respostas.get("recomendar_produtos", True):
+        return "handoff"
+    # Outros tópicos não permitidos
+    deve_resp, _ = _deve_handoff_por_respostas(state, respostas)
+    if deve_resp:
+        return "handoff"
+    # Regras de redirecionamento
     deve, _ = _deve_redirecionar(state["messages"], regras)
     if deve:
         return "handoff"
@@ -224,11 +308,21 @@ def should_continue(state: MessagesState, config: RunnableConfig) -> str:
 def handoff_node(state: MessagesState, config: RunnableConfig) -> dict:
     """
     Nó de handoff: informa que um assessor humano será acionado.
-    A regra casada é obtida via LLM (mesma lógica de _deve_redirecionar) e usada em handoff_reason.
+    Reason: regra de redirecionamento casada ou tópico não permitido (respostas_permitidas).
     """
-    regras = (config.get("configurable") or {}).get("regras_redirecionamento") or REGRAS_REDIRECIONAMENTO_PADRAO
-    deve, regra_casada = _deve_redirecionar(state["messages"], regras)
-    reason = regra_casada or "Regra de redirecionamento acionada"
+    cfg = config.get("configurable") or {}
+    regras = cfg.get("regras_redirecionamento") or REGRAS_REDIRECIONAMENTO_PADRAO
+    respostas = cfg.get("respostas_permitidas") or RESPOSTAS_PADRAO
+    if not isinstance(respostas, dict):
+        respostas = dict(RESPOSTAS_PADRAO)
+    _, regra_casada = _deve_redirecionar(state["messages"], regras)
+    _, topico_nao_permitido = _deve_handoff_por_respostas(state, respostas)
+    if regra_casada:
+        reason = regra_casada
+    elif topico_nao_permitido:
+        reason = f"Resposta não permitida: {topico_nao_permitido}"
+    else:
+        reason = "Regra de redirecionamento acionada"
     handoff_message = AIMessage(
         content=(
             "Para melhor atendê-lo neste assunto, vou encaminhar sua solicitação para um de nossos assessores. "

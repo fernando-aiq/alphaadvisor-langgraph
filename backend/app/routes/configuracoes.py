@@ -1,5 +1,7 @@
 from flask import Blueprint, request, jsonify
+import copy
 from app.utils.jwt_utils import get_user_id_from_token
+from app.services.s3_service import get_config_from_s3, put_config_to_s3, is_s3_configured
 
 configuracoes_bp = Blueprint('configuracoes', __name__)
 
@@ -95,43 +97,53 @@ CONFIGURACOES_PADRAO = {
     }
 }
 
-# Armazenamento em memória (em produção, usar banco de dados)
+# Armazenamento em memória (cache; S3 é a fonte de verdade quando configurado)
 configuracoes_usuario = {}
+
+
+def _get_config_for_user(user_id: str, fill_cache: bool = True):
+    """
+    Obtém configurações do usuário: S3 (se configurado) -> cache -> padrão.
+    Se fill_cache=True e vier do S3, preenche configuracoes_usuario[user_id].
+    """
+    if is_s3_configured():
+        from_s3 = get_config_from_s3(user_id)
+        if from_s3 is not None:
+            if fill_cache:
+                configuracoes_usuario[user_id] = from_s3
+            return from_s3
+    # Fallback: cache ou padrão
+    if user_id in configuracoes_usuario:
+        return configuracoes_usuario[user_id]
+    return copy.deepcopy(CONFIGURACOES_PADRAO)
+
 
 @configuracoes_bp.route('/api/configuracoes', methods=['GET'])
 def obter_configuracoes():
     """Obtém todas as configurações do usuário"""
-    # Tentar extrair user_id do token JWT no header
     token = request.headers.get('Authorization', '').replace('Bearer ', '')
     user_id_from_token = get_user_id_from_token(token) if token else None
-    
-    # Priorizar user_id do token, depois query param, depois default
     user_id = user_id_from_token or request.args.get('user_id', 'default')
-    
-    config = configuracoes_usuario.get(user_id, CONFIGURACOES_PADRAO.copy())
+
+    config = _get_config_for_user(user_id)
     return jsonify(config), 200
 
 @configuracoes_bp.route('/api/configuracoes', methods=['POST'])
 def salvar_configuracoes():
-    """Salva configurações do usuário"""
-    # Tentar extrair user_id do token JWT no header
+    """Salva configurações do usuário (memória + S3 quando configurado)"""
     token = request.headers.get('Authorization', '').replace('Bearer ', '')
     user_id_from_token = get_user_id_from_token(token) if token else None
-    
-    # Priorizar user_id do token, depois query param, depois default
     user_id = user_id_from_token or request.args.get('user_id', 'default')
-    
+
     data = request.get_json()
-    
     if not data:
         return jsonify({'error': 'Dados de configuração são obrigatórios'}), 400
-    
-    # Mesclar com configurações existentes
+
+    # Garantir que temos config atual (S3 ou cache) antes de mesclar
+    _get_config_for_user(user_id)
     if user_id not in configuracoes_usuario:
-        import copy
         configuracoes_usuario[user_id] = copy.deepcopy(CONFIGURACOES_PADRAO)
-    
-    # Atualizar configurações
+
     for secao, valores in data.items():
         if secao in configuracoes_usuario[user_id]:
             if isinstance(configuracoes_usuario[user_id][secao], dict) and isinstance(valores, dict):
@@ -140,7 +152,26 @@ def salvar_configuracoes():
                 configuracoes_usuario[user_id][secao] = valores
         else:
             configuracoes_usuario[user_id][secao] = valores
-    
+
+    # Espelhar autonomia em "default" para o agente LangSmith
+    if user_id != 'default' and 'autonomia' in data:
+        if 'default' not in configuracoes_usuario:
+            configuracoes_usuario['default'] = copy.deepcopy(CONFIGURACOES_PADRAO)
+        if 'autonomia' not in configuracoes_usuario['default']:
+            configuracoes_usuario['default']['autonomia'] = copy.deepcopy(CONFIGURACOES_PADRAO.get('autonomia', {}))
+        configuracoes_usuario['default']['autonomia'].update(data['autonomia'])
+
+    # Persistir no S3
+    import logging
+    _log = logging.getLogger(__name__)
+    ok1 = put_config_to_s3(user_id, configuracoes_usuario[user_id])
+    if not ok1:
+        _log.warning("[Configuracoes] S3 put_config_to_s3 falhou para user_id=%s (bucket configurado?)", user_id)
+    if user_id != 'default' and 'autonomia' in data:
+        ok2 = put_config_to_s3('default', configuracoes_usuario['default'])
+        if not ok2:
+            _log.warning("[Configuracoes] S3 put_config_to_s3 falhou para default")
+
     return jsonify({
         'message': 'Configurações salvas com sucesso',
         'configuracoes': configuracoes_usuario[user_id]
@@ -148,31 +179,31 @@ def salvar_configuracoes():
 
 @configuracoes_bp.route('/api/configuracoes/regras_redirecionamento', methods=['GET'])
 def obter_regras_redirecionamento():
-    """Retorna as regras de redirecionamento (handoff) do usuário. Usado pelo LangSmith/Studio."""
-    token = request.headers.get('Authorization', '').replace('Bearer ', '')
-    user_id_from_token = get_user_id_from_token(token) if token else None
-    user_id = user_id_from_token or request.args.get('user_id', 'default')
-    config = configuracoes_usuario.get(user_id)
-    if config is None:
-        regras = CONFIGURACOES_PADRAO.get('autonomia', {}).get('regras_redirecionamento', [])
-    else:
-        regras = config.get('autonomia', {}).get('regras_redirecionamento') or CONFIGURACOES_PADRAO.get('autonomia', {}).get('regras_redirecionamento', [])
-    return jsonify({"regras_redirecionamento": regras}), 200
+    """Retorna as regras de redirecionamento (handoff) e respostas permitidas. Usado pelo LangSmith/Studio.
+    Sempre usa 'default' (configuradas na página Autonomia, persistidas no S3). Uma única chamada traz ambos."""
+    config = _get_config_for_user('default')
+    autonomia = config.get('autonomia', {}) or CONFIGURACOES_PADRAO.get('autonomia', {})
+    regras = autonomia.get('regras_redirecionamento') or CONFIGURACOES_PADRAO.get('autonomia', {}).get('regras_redirecionamento', [])
+    respostas = autonomia.get('respostas') or CONFIGURACOES_PADRAO.get('autonomia', {}).get('respostas', {})
+    return jsonify({
+        "regras_redirecionamento": regras,
+        "respostas": respostas
+    }), 200
 
 
 @configuracoes_bp.route('/api/configuracoes/reset', methods=['POST'])
 def resetar_configuracoes():
-    """Reseta configurações para padrão"""
-    # Tentar extrair user_id do token JWT no header
+    """Reseta configurações para padrão (memória + S3 quando configurado)"""
     token = request.headers.get('Authorization', '').replace('Bearer ', '')
     user_id_from_token = get_user_id_from_token(token) if token else None
-    
-    # Priorizar user_id do token, depois query param, depois default
     user_id = user_id_from_token or request.args.get('user_id', 'default')
-    
-    import copy
+
     configuracoes_usuario[user_id] = copy.deepcopy(CONFIGURACOES_PADRAO)
-    
+    ok = put_config_to_s3(user_id, configuracoes_usuario[user_id])
+    if not ok:
+        import logging
+        logging.getLogger(__name__).warning("[Configuracoes] S3 put_config_to_s3 falhou no reset user_id=%s", user_id)
+
     return jsonify({
         'message': 'Configurações resetadas',
         'configuracoes': CONFIGURACOES_PADRAO
@@ -191,8 +222,8 @@ def obter_grafo_atual():
         
         print(f"[Configuracoes] Obtendo grafo para user_id: {user_id}")
         
-        # Obter configurações do usuário
-        user_config = configuracoes_usuario.get(user_id, CONFIGURACOES_PADRAO.copy())
+        # Obter configurações do usuário (S3 + cache ou padrão)
+        user_config = _get_config_for_user(user_id)
         agent_builder_config = user_config.get('agent_builder', {})
         
         # Verificar se há grafo customizado
@@ -256,17 +287,16 @@ def salvar_grafo():
         if 'nodes' not in graph_structure or 'edges' not in graph_structure:
             return jsonify({'error': 'Estrutura do grafo inválida'}), 400
         
-        # Mesclar com configurações existentes
+        # Garantir config atual e mesclar
+        _get_config_for_user(user_id)
         if user_id not in configuracoes_usuario:
-            import copy
             configuracoes_usuario[user_id] = copy.deepcopy(CONFIGURACOES_PADRAO)
-        
-        # Atualizar graph_structure no agent_builder
         if 'agent_builder' not in configuracoes_usuario[user_id]:
             configuracoes_usuario[user_id]['agent_builder'] = {}
-        
         configuracoes_usuario[user_id]['agent_builder']['graph_structure'] = graph_structure
-        
+
+        put_config_to_s3(user_id, configuracoes_usuario[user_id])
+
         return jsonify({
             'message': 'Grafo salvo com sucesso',
             'graph_structure': graph_structure

@@ -34,7 +34,7 @@ from agent.backend_tools import (
     calcular_projecao,
     buscar_oportunidades
 )
-from agent.config_tools import obter_regras_redirecionamento, REGRAS_REDIRECIONAMENTO_PADRAO
+from agent.config_tools import obter_regras_redirecionamento, REGRAS_REDIRECIONAMENTO_PADRAO, RESPOSTAS_PADRAO
 
 # Usar modelo configurável via .env ou padrão gpt-4o
 import os
@@ -296,6 +296,55 @@ def detect_recommendation_request(state: MessagesState) -> bool:
             return True
     
     return False
+
+
+def _deve_handoff_por_respostas(state: MessagesState, respostas: dict) -> Tuple[bool, Optional[str]]:
+    """
+    Verifica se a mensagem do usuário pede algo sobre um tópico cuja resposta não está permitida.
+    respostas: dict com keys falar_sobre_precos, falar_sobre_risco, recomendar_produtos, fornecer_projecoes, comparar_produtos.
+    Retorna (True, nome_do_topico) se pede sobre tópico não permitido; (False, None) caso contrário.
+    """
+    if not respostas:
+        return False, None
+    topicos_nao_permitidos = [k for k, v in respostas.items() if v is False]
+    if not topicos_nao_permitidos:
+        return False, None
+    user_msgs = [m for m in state.get("messages", []) if isinstance(m, HumanMessage)]
+    if not user_msgs:
+        return False, None
+    last_user = user_msgs[-1]
+    texto_usuario = _extract_text_plain(getattr(last_user, "content", None) or "")
+    if not texto_usuario:
+        return False, None
+    # Mapeamento nome amigável para key
+    topic_labels = {
+        "falar_sobre_precos": "preços e cotações",
+        "falar_sobre_risco": "riscos de investimentos",
+        "recomendar_produtos": "recomendação de produtos",
+        "fornecer_projecoes": "projeções financeiras",
+        "comparar_produtos": "comparação de produtos",
+    }
+    labels_str = ", ".join(topic_labels.get(t, t) for t in topicos_nao_permitidos)
+    prompt = (
+        "Você é um classificador. A mensagem do cliente pede informação ou ação sobre algum destes tópicos?\n"
+        f"Tópicos (não permitidos para o agente responder): {labels_str}\n\n"
+        f"Mensagem do cliente:\n\"\"\"\n{texto_usuario}\n\"\"\"\n\n"
+        "Responda com UMA ÚNICA LINHA:\n"
+        "- Se a mensagem pedir algo sobre um desses tópicos, responda apenas a CHAVE do tópico: falar_sobre_precos, falar_sobre_risco, recomendar_produtos, fornecer_projecoes ou comparar_produtos.\n"
+        "- Se não pedir sobre nenhum deles, responda apenas: NENHUM\n"
+        "Não invente. Só a chave exata ou NENHUM."
+    )
+    try:
+        resp = model.invoke([HumanMessage(content=prompt)])
+        out = (getattr(resp, "content", None) or str(resp)).strip().lower()
+        if not out or out == "nenhum":
+            return False, None
+        for t in topicos_nao_permitidos:
+            if t.lower() in out or out in t.lower():
+                return True, t
+        return True, topicos_nao_permitidos[0]
+    except Exception:
+        return False, None
 
 
 def _trigger_calculation_webhook_sync(
@@ -683,7 +732,7 @@ def should_route_after_init(state: MessagesState, config: Optional[RunnableConfi
         if detect_simple_calculation(content) is not None:
             return "calculate"
 
-    # 2) Handoff: regras + recomendação (só mensagens atuais, sem resposta do agente)
+    # 2) Handoff: regras de redirecionamento + respostas permitidas (mesma fonte, S3)
     cfg = (config or {}).get("configurable", {}) or {}
     user_id = cfg.get("user_id", "default")
     backend_url = cfg.get("backend_url") or os.getenv("BACKEND_URL")
@@ -693,11 +742,19 @@ def should_route_after_init(state: MessagesState, config: Optional[RunnableConfi
     try:
         result = obter_regras_redirecionamento.invoke(payload)
         regras = result.get("regras_redirecionamento") or []
+        respostas = result.get("respostas") or dict(RESPOSTAS_PADRAO)
     except Exception as e:
         print(f"[RegrasHandoff] should_route_after_init invoke falhou: {e}")
         regras = list(REGRAS_REDIRECIONAMENTO_PADRAO)
-    if detect_recommendation_request(state):
+        respostas = dict(RESPOSTAS_PADRAO)
+    # Resposta não permitida: recomendar produtos
+    if detect_recommendation_request(state) and not respostas.get("recomendar_produtos", True):
         return "handoff"
+    # Outros tópicos não permitidos (preços, risco, projeções, comparar)
+    deve_resp, _ = _deve_handoff_por_respostas(state, respostas)
+    if deve_resp:
+        return "handoff"
+    # Regras de redirecionamento
     deve, _ = _deve_redirecionar(state["messages"], regras)
     if deve:
         return "handoff"
@@ -709,7 +766,7 @@ def should_route_after_init(state: MessagesState, config: Optional[RunnableConfi
 def handoff_node(state: MessagesState, config: Optional[RunnableConfig] = None) -> dict:
     """
     Nó de handoff: informa que um assessor humano será acionado.
-    Obtém regras invocando a tool obter_regras_redirecionamento (mesma fonte que o agente).
+    Obtém regras e respostas invocando obter_regras_redirecionamento (mesma fonte, S3).
     """
     cfg = (config or {}).get("configurable", {}) or {}
     user_id = cfg.get("user_id", "default")
@@ -720,12 +777,20 @@ def handoff_node(state: MessagesState, config: Optional[RunnableConfig] = None) 
     try:
         result = obter_regras_redirecionamento.invoke(payload)
         regras = result.get("regras_redirecionamento") or []
+        respostas = result.get("respostas") or dict(RESPOSTAS_PADRAO)
     except Exception as e:
         print(f"[RegrasHandoff] handoff_node invoke falhou: {e}")
         regras = list(REGRAS_REDIRECIONAMENTO_PADRAO)
+        respostas = dict(RESPOSTAS_PADRAO)
     print(f"[RegrasHandoff] handoff_node user_id={user_id} backend_url={bool(backend_url)} regras_count={len(regras)}")
-    deve, regra_casada = _deve_redirecionar(state["messages"], regras)
-    reason = regra_casada or "Solicitação de recomendação de investimentos"
+    deve_regra, regra_casada = _deve_redirecionar(state["messages"], regras)
+    deve_resp, topico_nao_permitido = _deve_handoff_por_respostas(state, respostas)
+    if regra_casada:
+        reason = regra_casada
+    elif topico_nao_permitido:
+        reason = f"Resposta não permitida: {topico_nao_permitido}"
+    else:
+        reason = "Solicitação de recomendação de investimentos"
     handoff_message = AIMessage(
         content=(
             "Para melhor atendê-lo neste assunto, vou encaminhar sua solicitação para um de nossos assessores. "
