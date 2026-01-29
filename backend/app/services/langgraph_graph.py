@@ -198,19 +198,26 @@ def _deve_redirecionar(messages: list, regras: list[str], llm_model=None):
         return False, None
 
 
-def should_continue(state: MessagesState, config: RunnableConfig) -> str:
+def should_route_after_init(state: MessagesState, config: RunnableConfig) -> str:
     """
-    Determina o próximo nó após o agent.
-    Ordem: (1) tool_calls -> tools; (2) LLM decide se mensagem se enquadra em regras de redirecionamento -> handoff; (3) end.
-    Regras vêm de config["configurable"]["regras_redirecionamento"]. A decisão de match é feita pelo LLM, não por regras fixas.
+    Router pós-init: decide handoff ou agent com base só na mensagem do usuário.
+    A decisão de handoff é feita antes de o agente responder.
     """
-    last = state["messages"][-1]
-    if getattr(last, "tool_calls", None):
-        return "tools"
     regras = (config.get("configurable") or {}).get("regras_redirecionamento") or REGRAS_REDIRECIONAMENTO_PADRAO
     deve, _ = _deve_redirecionar(state["messages"], regras)
     if deve:
         return "handoff"
+    return "agent"
+
+
+def should_continue(state: MessagesState, config: RunnableConfig) -> str:
+    """
+    Determina o próximo nó após o agent. Handoff já foi decidido antes do agent (router pós-init).
+    Ordem: (1) tool_calls -> tools; (2) end.
+    """
+    last = state["messages"][-1]
+    if getattr(last, "tool_calls", None):
+        return "tools"
     return "end"
 
 
@@ -250,13 +257,19 @@ try:
         .add_node("end", end_node)
         .add_node("handoff", handoff_node)
         .add_edge(START, "init")
-        .add_edge("init", "agent")
+        .add_conditional_edges(
+            "init",
+            should_route_after_init,
+            {
+                "handoff": "handoff",
+                "agent": "agent",
+            },
+        )
         .add_conditional_edges(
             "agent",
             should_continue,
             {
                 "tools": "tools",
-                "handoff": "handoff",
                 "end": "end",
             },
         )

@@ -667,30 +667,42 @@ def should_call_webhook(state: MessagesState) -> str:
     return "end"
 
 
-def should_route_to_calculation(state: MessagesState) -> str:
+def should_route_after_init(state: MessagesState, config: Optional[RunnableConfig] = None) -> str:
     """
-    Função de roteamento que decide se deve ir para cálculo ou agent.
-    Verifica se há cálculo simples na mensagem do usuário.
+    Router pós-init: decide calculate | handoff | agent com base só na mensagem do usuário.
+    Ordem: (1) cálculo, (2) handoff (regras + recomendação), (3) agent.
+    A decisão de handoff é feita antes de o agente responder.
     """
-    # Buscar a última mensagem do usuário
+    # 1) Cálculo
     user_messages = [msg for msg in state.get("messages", []) if isinstance(msg, HumanMessage)]
     if not user_messages:
         return "agent"
-    
     last_user_message = user_messages[-1]
-    
-    # Extrair conteúdo
-    if not hasattr(last_user_message, 'content'):
-        return "agent"
-    
-    content = _extract_text_content(last_user_message.content)
-    
-    # Detectar cálculo
-    calculation = detect_simple_calculation(content)
-    
-    if calculation is not None:
-        return "calculate"
-    
+    if hasattr(last_user_message, "content"):
+        content = _extract_text_content(last_user_message.content)
+        if detect_simple_calculation(content) is not None:
+            return "calculate"
+
+    # 2) Handoff: regras + recomendação (só mensagens atuais, sem resposta do agente)
+    cfg = (config or {}).get("configurable", {}) or {}
+    user_id = cfg.get("user_id", "default")
+    backend_url = cfg.get("backend_url") or os.getenv("BACKEND_URL")
+    payload = {"user_id": user_id}
+    if backend_url:
+        payload["backend_url"] = backend_url
+    try:
+        result = obter_regras_redirecionamento.invoke(payload)
+        regras = result.get("regras_redirecionamento") or []
+    except Exception as e:
+        print(f"[RegrasHandoff] should_route_after_init invoke falhou: {e}")
+        regras = list(REGRAS_REDIRECIONAMENTO_PADRAO)
+    if detect_recommendation_request(state):
+        return "handoff"
+    deve, _ = _deve_redirecionar(state["messages"], regras)
+    if deve:
+        return "handoff"
+
+    # 3) Agent
     return "agent"
 
 
@@ -730,31 +742,12 @@ def handoff_node(state: MessagesState, config: Optional[RunnableConfig] = None) 
 
 def should_continue(state: MessagesState, config: Optional[RunnableConfig] = None) -> str:
     """
-    Determina o próximo nó após o agent.
-    Ordem: (1) tool_calls -> tools; (2) recomendação de investimentos ou regras de handoff -> handoff; (3) end.
-    Regras de handoff obtidas invocando a tool obter_regras_redirecionamento (mesma fonte que o agente).
+    Determina o próximo nó após o agent. Handoff já foi decidido antes do agent (router pós-init).
+    Ordem: (1) tool_calls -> tools; (2) end.
     """
     last = state["messages"][-1]
     if getattr(last, "tool_calls", None):
         return "tools"
-    cfg = (config or {}).get("configurable", {}) or {}
-    user_id = cfg.get("user_id", "default")
-    backend_url = cfg.get("backend_url") or os.getenv("BACKEND_URL")
-    payload = {"user_id": user_id}
-    if backend_url:
-        payload["backend_url"] = backend_url
-    try:
-        result = obter_regras_redirecionamento.invoke(payload)
-        regras = result.get("regras_redirecionamento") or []
-    except Exception as e:
-        print(f"[RegrasHandoff] should_continue invoke falhou: {e}")
-        regras = list(REGRAS_REDIRECIONAMENTO_PADRAO)
-    print(f"[RegrasHandoff] should_continue user_id={user_id} backend_url={bool(backend_url)} regras_count={len(regras)}")
-    if detect_recommendation_request(state):
-        return "handoff"
-    deve, _ = _deve_redirecionar(state["messages"], regras)
-    if deve:
-        return "handoff"
     return "end"
 
 
@@ -771,12 +764,13 @@ graph = (
     .add_node("end", end_node)
     # Definir fluxo: START → init → (conditional) → calculation → check_feedback → (conditional) → webhook/end
     .add_edge(START, "init")
-    # Conditional edge após init para rotear cálculos
+    # Conditional edge após init: calculate | handoff | agent (handoff decidido antes do agent)
     .add_conditional_edges(
         "init",
-        should_route_to_calculation,
+        should_route_after_init,
         {
             "calculate": "calculation",
+            "handoff": "handoff",
             "agent": "agent"
         }
     )
@@ -792,13 +786,12 @@ graph = (
         }
     )
     .add_edge("webhook", END)  # Webhook termina após execução
-    # Existing conditional edge após agent
+    # Após agent: só tools ou end (handoff já foi decidido no router pós-init)
     .add_conditional_edges(
         "agent",
         should_continue,
         {
             "tools": "tools",
-            "handoff": "handoff",
             "end": "end"
         }
     )
