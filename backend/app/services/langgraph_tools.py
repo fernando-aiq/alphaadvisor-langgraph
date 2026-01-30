@@ -24,6 +24,14 @@ except Exception as e:
     CARTEIRA = {}
     PERFIL_JOAO = {}
 
+# Importar serviço de regulacoes (para tool consultar_regulacao)
+try:
+    from app.services.regulacoes_service import get_regulacao as _get_regulacao, list_regulacoes as _list_regulacoes
+except Exception as e:
+    logger.warning("[LangGraphTools] regulacoes_service não disponível: %s", e)
+    _get_regulacao = None
+    _list_regulacoes = None
+
 # Importar funções do agent_tools
 try:
     from app.services.agent_tools import (
@@ -231,3 +239,30 @@ def buscar_oportunidades(perfil: str, problemas: List[str]) -> List[Dict[str, An
             for item in result
         ]
     return result
+
+
+@tool
+def consultar_regulacao(regulacao_id: str) -> Dict[str, Any]:
+    """
+    Consulta o texto completo de uma norma regulatória que o assessor de investimentos deve seguir.
+    Use quando o cliente perguntar sobre regulações, CVM, LGPD, leis do mercado de capitais, ANBIMA ou obrigações legais do assessor.
+    IDs disponíveis: cvm_178_2023 (assessor de investimentos), cvm_179_2023 (transparência remuneração),
+    lei_6385_1976 (Lei Mercado de Capitais), lei_13709_lgpd_2018 (LGPD), anbima_codigo_conduta (ANBIMA).
+    Para listar todas, use regulacao_id='lista'.
+
+    Args:
+        regulacao_id: ID da norma (ex: cvm_178_2023, lei_13709_lgpd_2018) ou 'lista' para listar normas disponíveis.
+
+    Returns:
+        Dict com id, titulo, norma, fonte_url, vigencia, resumo e texto_completo (ou lista de normas se regulacao_id='lista')
+    """
+    if _get_regulacao is None or _list_regulacoes is None:
+        return {"error": "Serviço de regulacoes não disponível."}
+    id_clean = (regulacao_id or "").strip().lower()
+    if id_clean in ("lista", "listar", ""):
+        items = _list_regulacoes()
+        return {"regulacoes": items, "mensagem": "Use consultar_regulacao com um dos ids acima para obter o texto completo."}
+    data = _get_regulacao(id_clean)
+    if data is None:
+        return {"error": f"Regulacao não encontrada: {regulacao_id}. Use regulacao_id='lista' para ver os ids disponíveis."}
+    return data

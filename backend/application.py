@@ -1,6 +1,6 @@
 from flask import Flask, jsonify, request
 from flask_cors import CORS
-from app.routes import chat, oportunidades, alertas, assessor, cliente, configuracoes, conexoes, health, trace_visualization, painel_agente, agent_builder, auth, langgraph_server
+from app.routes import chat, oportunidades, alertas, assessor, cliente, configuracoes, conexoes, health, trace_visualization, painel_agente, agent_builder, auth, langgraph_server, regulacoes
 import os
 import sys
 
@@ -153,7 +153,9 @@ try:
     logger.info("[Startup] Blueprint 'auth' registrado")
     app.register_blueprint(langgraph_server.langgraph_server_bp)
     logger.info("[Startup] Blueprint 'langgraph_server' registrado")
-    
+    app.register_blueprint(regulacoes.regulacoes_bp)
+    logger.info("[Startup] Blueprint 'regulacoes' registrado")
+
     # Listar todas as rotas registradas para debug
     logger.info("[Startup] Rotas registradas:")
     for rule in app.url_map.iter_rules():

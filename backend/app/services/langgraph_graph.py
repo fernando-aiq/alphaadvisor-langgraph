@@ -46,7 +46,8 @@ try:
         analisar_diversificacao,
         recomendar_rebalanceamento,
         calcular_projecao,
-        buscar_oportunidades
+        buscar_oportunidades,
+        consultar_regulacao,
     )
     logger.info("[LangGraphGraph] Imports realizados com sucesso")
 except Exception as e:
@@ -68,7 +69,8 @@ tools = [
     analisar_diversificacao,
     recomendar_rebalanceamento,
     calcular_projecao,
-    buscar_oportunidades
+    buscar_oportunidades,
+    consultar_regulacao,
 ]
 
 tool_node = ToolNode(tools)
@@ -86,8 +88,9 @@ SYSTEM = (
     "- recomendar_rebalanceamento: Gera recomendações de rebalanceamento. Use quando perguntarem sobre rebalanceamento ou ajustes.\n"
     "- calcular_projecao: Calcula projeção de investimento. Use quando perguntarem sobre projeções ou viabilidade de objetivos.\n"
     "- buscar_oportunidades: Busca oportunidades de investimento. Use quando perguntarem sobre oportunidades ou recomendações de produtos.\n"
+    "- consultar_regulacao: Consulta o texto completo de normas que o assessor deve seguir (CVM 178/179, Lei Mercado de Capitais, LGPD, ANBIMA). Use quando perguntarem sobre regulações, obrigações legais do assessor, CVM, LGPD ou leis do mercado de capitais.\n"
     "\n"
-    "IMPORTANTE: Sempre use as ferramentas quando necessário. Se o cliente perguntar sobre perfil, carteira, adequação, etc., "
+    "IMPORTANTE: Sempre use as ferramentas quando necessário. Se o cliente perguntar sobre perfil, carteira, adequação, regulações, etc., "
     "use as ferramentas apropriadas para obter dados reais antes de responder. "
     "Seja conversacional, empático e claro nas explicações."
 )

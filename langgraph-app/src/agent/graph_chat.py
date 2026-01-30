@@ -35,6 +35,7 @@ from agent.backend_tools import (
     buscar_oportunidades
 )
 from agent.config_tools import obter_regras_redirecionamento, REGRAS_REDIRECIONAMENTO_PADRAO, RESPOSTAS_PADRAO
+from agent.regulacoes_tools import consultar_regulacao
 from agent.compliance_tools import COMPLIANCE_TOOLS
 
 # Usar modelo configurável via .env ou padrão gpt-4o
@@ -42,7 +43,7 @@ import os
 model_name = os.getenv('AI_MODEL', 'gpt-4o')
 model = ChatOpenAI(model=model_name, temperature=0.7)
 
-# Todas as tools do backend + tool de regras de handoff
+# Todas as tools do backend + tool de regras de handoff + regulacoes
 tools = [
     obter_perfil,
     obter_carteira,
@@ -53,6 +54,7 @@ tools = [
     calcular_projecao,
     buscar_oportunidades,
     obter_regras_redirecionamento,
+    consultar_regulacao,
 ]
 
 tool_node = ToolNode(tools)
@@ -71,8 +73,9 @@ SYSTEM = (
     "- calcular_projecao: Calcula projeção de investimento. Use quando perguntarem sobre projeções ou viabilidade de objetivos.\n"
     "- buscar_oportunidades: Busca oportunidades de investimento. Use quando perguntarem sobre oportunidades ou recomendações de produtos.\n"
     "- obter_regras_redirecionamento: Busca as regras de handoff (quando transferir para assessor humano). Use quando perguntarem 'quais tools tem', 'tem ferramentas pra handoff' ou 'quando vocês transferem para humano'.\n"
+    "- consultar_regulacao: Consulta o texto completo de normas que o assessor deve seguir (CVM 178/179, Lei Mercado de Capitais, LGPD, ANBIMA). Use quando perguntarem sobre regulações, obrigações legais do assessor, CVM, LGPD ou leis do mercado de capitais.\n"
     "\n"
-    "IMPORTANTE: Sempre use as ferramentas quando necessário. Se o cliente perguntar sobre perfil, carteira, adequação, etc., "
+    "IMPORTANTE: Sempre use as ferramentas quando necessário. Se o cliente perguntar sobre perfil, carteira, adequação, regulações, etc., "
     "use as ferramentas apropriadas para obter dados reais antes de responder. "
     "Seja conversacional, empático e claro nas explicações.\n"
     "\n"

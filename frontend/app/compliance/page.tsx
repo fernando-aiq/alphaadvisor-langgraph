@@ -11,7 +11,8 @@ import {
   FiAlertCircle,
   FiPlus,
   FiEye,
-  FiX
+  FiX,
+  FiExternalLink
 } from 'react-icons/fi'
 
 interface ComplianceItem {
@@ -48,6 +49,19 @@ interface Client {
   client_id: string
   client_name: string
   traces_count: number
+}
+
+interface Regulacao {
+  id: string
+  titulo: string
+  norma: string
+  fonte_url: string
+  vigencia: string
+  resumo: string
+}
+
+interface RegulacaoDetail extends Regulacao {
+  texto_completo?: string
 }
 
 const POLICIES = [
@@ -96,6 +110,11 @@ export default function CompliancePage() {
   const [newRuleDescription, setNewRuleDescription] = useState('')
   const [newRuleCategory, setNewRuleCategory] = useState('')
   const [submittingRule, setSubmittingRule] = useState(false)
+  const [regulacoes, setRegulacoes] = useState<Regulacao[]>([])
+  const [loadingRegulacoes, setLoadingRegulacoes] = useState(true)
+  const [regulacaoModalId, setRegulacaoModalId] = useState<string | null>(null)
+  const [regulacaoDetail, setRegulacaoDetail] = useState<RegulacaoDetail | null>(null)
+  const [loadingRegulacaoDetail, setLoadingRegulacaoDetail] = useState(false)
 
   const loadClients = useCallback(async () => {
     try {
@@ -151,10 +170,25 @@ export default function CompliancePage() {
     }
   }, [])
 
+  const loadRegulacoes = useCallback(async () => {
+    setLoadingRegulacoes(true)
+    try {
+      const res = await fetch('/api/regulacoes')
+      if (!res.ok) throw new Error('Falha ao carregar normas')
+      const data = await res.json()
+      setRegulacoes(data.regulacoes || [])
+    } catch {
+      setRegulacoes([])
+    } finally {
+      setLoadingRegulacoes(false)
+    }
+  }, [])
+
   useEffect(() => {
     loadClients()
     loadRules()
-  }, [loadClients, loadRules])
+    loadRegulacoes()
+  }, [loadClients, loadRules, loadRegulacoes])
 
   useEffect(() => {
     setLoading(true)
@@ -182,6 +216,28 @@ export default function CompliancePage() {
   const closeDetail = () => {
     setDetailTraceId(null)
     setDetailData(null)
+  }
+
+  const openRegulacaoDetail = async (id: string) => {
+    setRegulacaoModalId(id)
+    setRegulacaoDetail(null)
+    setLoadingRegulacaoDetail(true)
+    try {
+      const res = await fetch(`/api/regulacoes/${encodeURIComponent(id)}`)
+      if (res.ok) {
+        const data = await res.json()
+        setRegulacaoDetail(data)
+      }
+    } catch {
+      setRegulacaoDetail(null)
+    } finally {
+      setLoadingRegulacaoDetail(false)
+    }
+  }
+
+  const closeRegulacaoModal = () => {
+    setRegulacaoModalId(null)
+    setRegulacaoDetail(null)
   }
 
   const handleExport = async (format: 'csv' | 'json') => {
@@ -296,6 +352,55 @@ export default function CompliancePage() {
             </div>
           ))}
         </div>
+      </Card>
+
+      {/* Normas que o agente utiliza */}
+      <Card style={{ padding: '1.5rem', marginBottom: '2rem' }}>
+        <h2 style={{ margin: '0 0 1rem 0', fontSize: '1.25rem' }}>Normas que o agente utiliza</h2>
+        <p style={{ color: '#666', fontSize: '0.9rem', marginBottom: '1rem' }}>
+          Normas regulatórias consultadas pelo agente (CVM, Lei Mercado de Capitais, LGPD, ANBIMA). Clique em &quot;Ver texto completo&quot; para abrir o conteúdo integral.
+        </p>
+        {loadingRegulacoes ? (
+          <div style={{ padding: '1.5rem', textAlign: 'center', color: '#666' }}>
+            <FiLoader className="animate-spin" style={{ fontSize: '1.5rem', marginBottom: '0.5rem', display: 'block' }} />
+            Carregando normas...
+          </div>
+        ) : regulacoes.length === 0 ? (
+          <p style={{ color: '#666', fontSize: '0.9rem' }}>Nenhuma norma disponível. Verifique se o backend está acessível.</p>
+        ) : (
+          <div style={{ display: 'grid', gap: '1rem' }}>
+            {regulacoes.map((r) => (
+              <div
+                key={r.id}
+                style={{
+                  padding: '1rem',
+                  background: '#f8fafc',
+                  borderRadius: '8px',
+                  borderLeft: '4px solid #10b981'
+                }}
+              >
+                <div style={{ fontWeight: '600', marginBottom: '0.25rem' }}>{r.titulo}</div>
+                <div style={{ fontSize: '0.85rem', color: '#555', marginBottom: '0.25rem' }}>{r.norma}</div>
+                {r.vigencia && <div style={{ fontSize: '0.8rem', color: '#888', marginBottom: '0.5rem' }}>Vigência: {r.vigencia}</div>}
+                <div style={{ fontSize: '0.9rem', color: '#555', marginBottom: '0.75rem' }}>{r.resumo}</div>
+                <button
+                  onClick={() => openRegulacaoDetail(r.id)}
+                  style={{
+                    padding: '0.4rem 0.8rem',
+                    background: '#10b981',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    fontSize: '0.85rem'
+                  }}
+                >
+                  Ver texto completo
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
 
       {/* Regras de compliance específicas */}
@@ -613,6 +718,87 @@ export default function CompliancePage() {
                 {submittingRule ? <FiLoader className="animate-spin" size={16} /> : <FiPlus size={16} />}
                 {submittingRule ? 'Salvando...' : 'Incluir'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal texto completo da norma */}
+      {regulacaoModalId && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: '2rem'
+          }}
+          onClick={closeRegulacaoModal}
+        >
+          <div
+            style={{
+              background: 'white',
+              borderRadius: '8px',
+              maxWidth: '800px',
+              width: '100%',
+              maxHeight: '80vh',
+              overflow: 'hidden',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 4px 20px rgba(0,0,0,0.15)'
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.5rem', borderBottom: '1px solid #eee' }}>
+              <h3 style={{ margin: 0, fontSize: '1.1rem' }}>
+                {regulacaoDetail ? regulacaoDetail.titulo : regulacaoModalId}
+              </h3>
+              <button onClick={closeRegulacaoModal} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '0.25rem' }}>
+                <FiX size={24} />
+              </button>
+            </div>
+            <div style={{ padding: '1rem 1.5rem', overflow: 'auto', flex: 1 }}>
+              {loadingRegulacaoDetail ? (
+                <div style={{ textAlign: 'center', padding: '2rem' }}>
+                  <FiLoader className="animate-spin" style={{ fontSize: '1.5rem' }} />
+                </div>
+              ) : regulacaoDetail ? (
+                <>
+                  {regulacaoDetail.norma && <div style={{ fontSize: '0.9rem', color: '#555', marginBottom: '0.5rem' }}>{regulacaoDetail.norma}</div>}
+                  {regulacaoDetail.fonte_url && (
+                    <a
+                      href={regulacaoDetail.fonte_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem', marginBottom: '1rem', color: '#2196F3', fontSize: '0.9rem' }}
+                    >
+                      <FiExternalLink size={14} />
+                      Fonte oficial
+                    </a>
+                  )}
+                  {regulacaoDetail.texto_completo && (
+                    <div
+                      style={{
+                        fontSize: '0.85rem',
+                        overflow: 'auto',
+                        background: '#f8fafc',
+                        padding: '1rem',
+                        borderRadius: '4px',
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-word',
+                        maxHeight: '50vh'
+                      }}
+                    >
+                      {regulacaoDetail.texto_completo}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p style={{ color: '#666' }}>Não foi possível carregar o texto da norma.</p>
+              )}
             </div>
           </div>
         </div>
