@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
-from langchain_core.messages import SystemMessage, AIMessage, HumanMessage
+from langchain_core.messages import SystemMessage, AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_openai import ChatOpenAI
 from langgraph.graph import MessagesState, StateGraph, START, END
@@ -35,6 +35,7 @@ from agent.backend_tools import (
     buscar_oportunidades
 )
 from agent.config_tools import obter_regras_redirecionamento, REGRAS_REDIRECIONAMENTO_PADRAO, RESPOSTAS_PADRAO
+from agent.compliance_tools import COMPLIANCE_TOOLS
 
 # Usar modelo configurável via .env ou padrão gpt-4o
 import os
@@ -805,15 +806,103 @@ def handoff_node(state: MessagesState, config: Optional[RunnableConfig] = None) 
     return {"messages": [handoff_message]}
 
 
+# Agente de compliance: revisor que consulta políticas antes da resposta final
+COMPLIANCE_SYSTEM = (
+    "Você é um revisor de compliance. Sua tarefa é validar a resposta rascunho do agente principal "
+    "à luz das políticas de compliance (LGPD, CVM, Auditoria, PII, Retenção) e das regras específicas cadastradas. "
+    "Você recebe a resposta rascunho e a pergunta do usuário. "
+    "Use as ferramentas para consultar as políticas que achar relevantes (consultar_politica_lgpd, consultar_politica_cvm, "
+    "consultar_politica_auditoria, consultar_politica_pii, consultar_politica_retencao, consultar_regras_especificas). "
+    "Depois: (1) Aprove a resposta como está se estiver em conformidade, ou (2) Ajuste apenas o necessário para conformidade "
+    "(tom, divulgação de dados, promessas de rentabilidade, etc.) sem mudar o sentido da resposta. "
+    "Responda APENAS com o texto final da resposta ao usuário (a resposta validada ou corrigida). "
+    "Não explique o que você fez; devolva só o texto que o usuário deve ver."
+)
+
+compliance_llm = ChatOpenAI(model=model_name, temperature=0.2)
+compliance_llm_with_tools = compliance_llm.bind_tools(COMPLIANCE_TOOLS)
+_compliance_tools_by_name = {t.name: t for t in COMPLIANCE_TOOLS}
+
+
+def compliance_check_node(state: MessagesState, config: Optional[RunnableConfig] = None) -> dict:
+    """
+    Nó que invoca o agente de compliance para validar a resposta final do agente principal.
+    Consulta políticas via tools conforme necessário e devolve o texto validado.
+    """
+    messages_list = list(state.get("messages", []))
+    if not messages_list:
+        return state
+    last_msg = messages_list[-1]
+    if not isinstance(last_msg, AIMessage):
+        return state
+    draft_content = getattr(last_msg, "content", "") or ""
+    if isinstance(draft_content, list):
+        draft_content = " ".join(str(x) for x in draft_content)
+    last_human = None
+    for m in reversed(messages_list):
+        if isinstance(m, HumanMessage):
+            last_human = m
+            break
+    user_question = ""
+    if last_human and hasattr(last_human, "content"):
+        c = last_human.content
+        user_question = c if isinstance(c, str) else " ".join(str(x) for x in c)
+    cfg = (config or {}).get("configurable", {}) or {}
+    backend_url = cfg.get("backend_url") or os.getenv("BACKEND_URL")
+    prompt = (
+        f"Resposta rascunho do agente:\n\n{draft_content}\n\n"
+        f"Pergunta do usuário:\n\n{user_question}\n\n"
+        "Consulte as políticas que precisar e devolva o texto final da resposta (validada ou corrigida)."
+    )
+    compliance_messages = [
+        SystemMessage(content=COMPLIANCE_SYSTEM),
+        HumanMessage(content=prompt),
+    ]
+    max_iterations = 10
+    for _ in range(max_iterations):
+        response = compliance_llm_with_tools.invoke(compliance_messages)
+        tool_calls = getattr(response, "tool_calls", None) or []
+        if not tool_calls:
+            break
+        compliance_messages.append(response)
+        for tc in tool_calls:
+            name = tc.get("name", "")
+            args = tc.get("args", {}) or {}
+            if backend_url:
+                args = {**args, "backend_url": backend_url}
+            tool = _compliance_tools_by_name.get(name)
+            if tool:
+                try:
+                    result = tool.invoke(args)
+                    if not isinstance(result, str):
+                        result = json.dumps(result, ensure_ascii=False)
+                except Exception as e:
+                    result = json.dumps({"error": str(e)})
+            else:
+                result = json.dumps({"error": f"Tool não encontrada: {name}"})
+            compliance_messages.append(
+                ToolMessage(content=result, tool_call_id=tc.get("id", ""))
+            )
+    final_content = getattr(response, "content", "") or draft_content
+    if isinstance(final_content, list):
+        final_content = " ".join(str(x) for x in final_content)
+    new_aimessage = AIMessage(
+        content=final_content,
+        additional_kwargs={"compliance_checked": True}
+    )
+    messages_list[-1] = new_aimessage
+    return {"messages": messages_list}
+
+
 def should_continue(state: MessagesState, config: Optional[RunnableConfig] = None) -> str:
     """
     Determina o próximo nó após o agent. Handoff já foi decidido antes do agent (router pós-init).
-    Ordem: (1) tool_calls -> tools; (2) end.
+    Ordem: (1) tool_calls -> tools; (2) sem tool_calls -> compliance_check (antes da resposta final).
     """
     last = state["messages"][-1]
     if getattr(last, "tool_calls", None):
         return "tools"
-    return "end"
+    return "compliance_check"
 
 
 graph = (
@@ -826,6 +915,7 @@ graph = (
     .add_node("agent", agent_node)
     .add_node("tools", tool_node)
     .add_node("handoff", handoff_node)
+    .add_node("compliance_check", compliance_check_node)
     .add_node("end", end_node)
     # Definir fluxo: START → init → (conditional) → calculation → check_feedback → (conditional) → webhook/end
     .add_edge(START, "init")
@@ -851,16 +941,17 @@ graph = (
         }
     )
     .add_edge("webhook", END)  # Webhook termina após execução
-    # Após agent: só tools ou end (handoff já foi decidido no router pós-init)
+    # Após agent: tools ou compliance_check (resposta final passa pelo agente de compliance)
     .add_conditional_edges(
         "agent",
         should_continue,
         {
             "tools": "tools",
-            "end": "end"
+            "compliance_check": "compliance_check"
         }
     )
     .add_edge("tools", "agent")
+    .add_edge("compliance_check", "end")
     .add_edge("handoff", END)  # Handoff termina o fluxo
     .add_edge("end", END)
     .compile(name="agent")

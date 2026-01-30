@@ -29,6 +29,7 @@ const clienteMenuItems = [
   { href: '/conexoes', label: 'Conexões (Open Finance)', icon: FiLink },
   { href: '/studio', label: 'Studio', icon: FiCode, isAdmin: true },
   { href: '/painel-do-agente', label: 'Painel do Agente', icon: FiActivity, isAdmin: true },
+  { href: '/compliance', label: 'Compliance', icon: FiShield, isAdmin: true },
   { href: '/deploy', label: 'Deploy', icon: FiSend, isAdmin: true },
   { href: '/autonomia', label: 'Autonomia', icon: FiShield, isAdmin: true },
 ]

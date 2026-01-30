@@ -12,7 +12,6 @@ import {
   FiArrowRight,
   FiFilter,
   FiDownload,
-  FiShield,
   FiFileText,
   FiEye,
   FiCalendar,
@@ -88,7 +87,7 @@ interface Client {
 export default function PainelDoAgente() {
   const router = useRouter()
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<'overview' | 'activity' | 'handoffs' | 'compliance'>('overview')
+  const [activeTab, setActiveTab] = useState<'overview' | 'activity' | 'handoffs'>('overview')
   const [error, setError] = useState<string | null>(null)
   
   // Dados
@@ -460,56 +459,6 @@ export default function PainelDoAgente() {
     }
   }
 
-  const handleExportCompliance = async () => {
-    try {
-      const data = await aggregateData()
-      let filteredTraces = data.traces
-      
-      // Aplicar filtros
-      if (selectedClient) {
-        filteredTraces = filteredTraces.filter(t => t.client_id === selectedClient)
-      }
-      if (startDate) {
-        filteredTraces = filteredTraces.filter(t => new Date(t.timestamp) >= new Date(startDate))
-      }
-      if (endDate) {
-        filteredTraces = filteredTraces.filter(t => new Date(t.timestamp) <= new Date(endDate))
-      }
-      
-      // Criar CSV
-      const headers = ['Trace ID', 'Timestamp', 'Cliente', 'Input', 'Intent', 'Route', 'Status', 'Tool Calls', 'Handoff', 'Erros']
-      const rows = filteredTraces.map(t => [
-        t.trace_id,
-        t.timestamp,
-        t.client_name || t.client_id || 'N/A',
-        t.user_input || '',
-        t.intent || 'N/A',
-        t.route || 'N/A',
-        t.status,
-        t.tool_calls_count.toString(),
-        t.has_handoff ? 'Sim' : 'Não',
-        t.errors_count.toString(),
-      ])
-      
-      const csvContent = [
-        headers.join(','),
-        ...rows.map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(','))
-      ].join('\n')
-      
-      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-      const url = window.URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.setAttribute('download', `compliance_export_${new Date().toISOString().split('T')[0]}.csv`)
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-    } catch (error) {
-      console.error('Erro ao exportar compliance:', error)
-      alert('Erro ao exportar dados de compliance')
-    }
-  }
-
   const formatDate = (dateString: string) => {
     if (!dateString) return '-'
     try {
@@ -587,8 +536,7 @@ export default function PainelDoAgente() {
         {[
           { id: 'overview', label: 'Visão Geral', icon: FiActivity },
           { id: 'activity', label: 'Atividade', icon: FiFileText },
-          { id: 'handoffs', label: 'Redirecionamentos', icon: FiArrowRight },
-          { id: 'compliance', label: 'Compliance', icon: FiShield }
+          { id: 'handoffs', label: 'Redirecionamentos', icon: FiArrowRight }
         ].map(tab => {
           const Icon = tab.icon
           return (
@@ -920,53 +868,6 @@ export default function PainelDoAgente() {
         </Card>
       )}
 
-      {activeTab === 'compliance' && (
-        <div>
-          <Card style={{ padding: '1.5rem', marginBottom: '2rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-              <h3 style={{ margin: 0 }}>Compliance e Auditoria</h3>
-              <button
-                onClick={handleExportCompliance}
-                style={{
-                  padding: '0.75rem 1.5rem',
-                  background: '#10b981',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  fontSize: '0.9rem'
-                }}
-              >
-                <FiDownload />
-                Exportar CSV
-              </button>
-            </div>
-            <div style={{ color: '#666', lineHeight: '1.6' }}>
-              <p><strong>LGPD:</strong> Todos os traces são armazenados com base legal e consentimento quando aplicável.</p>
-              <p><strong>Auditoria:</strong> Trilha completa de eventos e acessos é mantida para cada interação.</p>
-              <p><strong>Mascaramento:</strong> Dados sensíveis (PII) são mascarados automaticamente quando necessário.</p>
-              <p><strong>Retenção:</strong> Traces são mantidos por 90 dias (configurável) para fins de auditoria e compliance.</p>
-            </div>
-          </Card>
-
-          <Card style={{ padding: '1.5rem' }}>
-            <h3 style={{ marginBottom: '1rem' }}>Informações de Compliance por Trace</h3>
-            <div style={{ fontSize: '0.9rem', color: '#666' }}>
-              Clique em um trace na aba &quot;Atividade&quot; para ver detalhes completos de compliance, incluindo:
-              <ul style={{ marginTop: '0.5rem', paddingLeft: '1.5rem' }}>
-                <li>Base legal LGPD aplicada</li>
-                <li>Status de consentimento</li>
-                <li>Dados mascarados (PII)</li>
-                <li>Idade do trace e política de retenção</li>
-                <li>Log de acessos e auditoria</li>
-              </ul>
-            </div>
-          </Card>
-        </div>
-      )}
     </div>
   )
 }
